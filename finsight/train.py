@@ -14,11 +14,12 @@ from .prompt import build_messages, gold_target
 LORA_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 
-def build_examples(docs, questions, tok, max_len=4096):
+def build_examples(docs, questions, tok, max_len=4096, targets=None):
+    """targets: optional {uid: target text} that replaces the gold target (used by expert iteration)."""
     examples, skipped = [], 0
     rendered = {}
     for q in questions:
-        target = gold_target(q)
+        target = targets.get(q["uid"]) if targets is not None else gold_target(q)
         if target is None:
             skipped += 1
             continue
@@ -58,16 +59,18 @@ class Collator:
 
 
 def train(model_id, docs, questions, out_dir, epochs=1, lr=2e-4, lora_r=16, batch_size=1, grad_accum=16,
-          max_len=4096, max_examples=None, save_steps=200, seed=0, four_bit=True):
+          max_len=4096, max_examples=None, save_steps=200, seed=0, four_bit=True, targets=None,
+          init_adapter=None):
     """four_bit=True is QLoRA (needed for 7B on a 16 GB GPU). four_bit=False is plain LoRA on
-    16-bit weights: faster, and fits a 3B model on a T4."""
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    16-bit weights: faster, and fits a 3B model on a T4.
+    targets / init_adapter: continue training an existing adapter on custom targets (expert iteration)."""
+    from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments
 
     tok = AutoTokenizer.from_pretrained(model_id)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
-    examples = build_examples(docs, questions, tok, max_len)
+    examples = build_examples(docs, questions, tok, max_len, targets)
     random.Random(seed).shuffle(examples)
     if max_examples:
         examples = examples[:max_examples]
@@ -83,8 +86,11 @@ def train(model_id, docs, questions, out_dir, epochs=1, lr=2e-4, lora_r=16, batc
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", dtype=dtype)
         model.gradient_checkpointing_enable()
         model.enable_input_require_grads()
-    model = get_peft_model(model, LoraConfig(r=lora_r, lora_alpha=2 * lora_r, lora_dropout=0.05,
-                                             target_modules=LORA_TARGETS, task_type="CAUSAL_LM"))
+    if init_adapter:
+        model = PeftModel.from_pretrained(model, init_adapter, is_trainable=True)
+    else:
+        model = get_peft_model(model, LoraConfig(r=lora_r, lora_alpha=2 * lora_r, lora_dropout=0.05,
+                                                 target_modules=LORA_TARGETS, task_type="CAUSAL_LM"))
     model.print_trainable_parameters()
 
     steps = max(1, len(examples) * epochs // (batch_size * grad_accum))

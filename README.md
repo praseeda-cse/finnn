@@ -31,6 +31,10 @@ arithmetic questions execute exactly to the gold answer.
 | `finsight/infer.py` | 4-bit model loading, batched generation with resume |
 | `finsight/train.py` | QLoRA SFT with resume from checkpoints |
 | `finsight/evaluate.py` | official scorer + per-type EM/F1 + evidence recall/precision |
+| `finsight/verify.py` | Step 5.4: checks answers against the cited evidence (operands, text, scale, format) |
+| `finsight/trust.py` | Steps 5.6–5.7: verification-weighted voting, confidence, risk–coverage, abstention threshold |
+| `finsight/reinforce.py` | Steps 4.2/4.5: evidence-aware reward and expert-iteration target selection |
+| `finsight/demo.py` | Step 5.8: read any digital PDF, answer, highlight evidence on the page |
 | `finsight/tatqa_metric.py`, `tatqa_utils.py` | **official** TAT-QA scorer (MIT, vendored) |
 | `scripts/build_compact.py` | pack `fp/dataset` → `data/*.json.gz` (19 MB total) |
 | `scripts/sanity_check.py` | oracle check: gold through our pipeline = **99.7% EM on test** |
@@ -38,11 +42,16 @@ arithmetic questions execute exactly to the gold answer.
 | `scripts/make_bundle.py`, `make_notebooks.py` | build the Drive upload zip / the notebooks |
 | `notebooks/01_zero_shot_baseline.ipynb` | no training, 7B few-shot |
 | `notebooks/02_finetune_and_eval.ipynb` | QLoRA fine-tune, then dev and test evaluation |
+| `notebooks/03_trust_and_reinforce.ipynb` | voting + confidence + abstention; expert iteration |
+| `notebooks/04_demo_app.ipynb` | Gradio demo: upload PDF, ask, see answer + highlighted evidence |
+| `scripts/test_trust.py` | CPU-only tests of voting, reward and expert-iteration selection |
 
 ## Run on Colab (browser)
 Open a notebook straight from GitHub:
 - Baseline: https://colab.research.google.com/github/praseeda-cse/finnn/blob/main/notebooks/01_zero_shot_baseline.ipynb
 - Fine-tune: https://colab.research.google.com/github/praseeda-cse/finnn/blob/main/notebooks/02_finetune_and_eval.ipynb
+- Trust + RL: https://colab.research.google.com/github/praseeda-cse/finnn/blob/main/notebooks/03_trust_and_reinforce.ipynb
+- Demo: https://colab.research.google.com/github/praseeda-cse/finnn/blob/main/notebooks/04_demo_app.ipynb
 
 Then: **Runtime → Change runtime type → T4 GPU → Save**, then **Runtime → Run all**. The first cell clones this repo
 and asks to mount Google Drive. Results go to **My Drive/finsight/runs/**, so they survive disconnects.
