@@ -107,12 +107,19 @@ finetune = notebook([
          'RUN = f"{OUT}/sft_{MODEL_ID.split(\'/\')[-1]}" + (f"_{MAX_EXAMPLES}" if MAX_EXAMPLES else "")\n\n'
          'adapter = train(MODEL_ID, docs_train, q_train, RUN, epochs=1, batch_size=1, grad_accum=16,\n'
          '                max_examples=MAX_EXAMPLES, save_steps=100)'),
-    md("## Evaluate on dev (use dev for all tuning decisions)"),
-    code('model, tok = load_model(MODEL_ID, adapter=f"{RUN}/final")\n'
-         'eval_qs = q_dev                         # or sample(q_dev, 300) for a quick check\n'
-         'preds = predict(model, tok, docs_dev, eval_qs, f"{RUN}/pred_dev.jsonl", batch_size=8)\n'
+    md("## Evaluate on dev (use dev for all tuning decisions)\n"
+       "Uses the finished adapter, **or the newest checkpoint** if training stopped. To evaluate a checkpoint "
+       "without training further, run only the setup cell and then this cell (skip the training cell)."),
+    code('MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"\n'
+         'RUN = f"{OUT}/sft_Qwen2.5-3B-Instruct"\n'
+         'ADAPTER = latest_adapter(RUN)\n'
+         'N_EVAL = 300                            # quick check (~10 min); len(q_dev) = 1,644 for the full dev score\n'
+         'eval_qs = sample(q_dev, N_EVAL, seed=1)\n'
+         'tag = os.path.basename(ADAPTER)\n'
+         'model, tok = load_model(MODEL_ID, adapter=ADAPTER)\n'
+         'preds = predict(model, tok, docs_dev, eval_qs, f"{RUN}/pred_dev_{tag}_{N_EVAL}.jsonl", batch_size=8)\n'
          'result = score(eval_qs, preds)\n'
-         'print_report(result, "fine-tuned, dev")'),
+         'print_report(result, f"fine-tuned ({tag}), dev sample")'),
     code(SHOW_ERRORS),
     md("## Final: test set. Run this only once you stop changing things\n"
        "It also writes `pred_test_official.json` in the official `{uid: [answer, scale]}` format."),
