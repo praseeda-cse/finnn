@@ -280,10 +280,55 @@ nofinetune = notebook([
          '          open(f"{OUT}/noft_comparison_dev{N}.json", "w"), indent=1)'),
 ])
 
+tatllm_nb = notebook([
+    md("# 06 · TAT-LLM (pre-trained by its authors) + our executor, scored with the official scorer\n\n"
+       "**No training on our side.** TAT-LLM (Zhu et al., 2024) is LLaMA-2 already fine-tuned by its authors on "
+       "FinQA, TAT-QA and TAT-DQA (`next-tat/tat-llm-7b-fft`, public). Its prompt is rebuilt exactly as in the "
+       "authors' released files (identical for all 1,644 dev questions).\n\n"
+       "The authors report 72.6 EM on TAT-DQA, but their evaluation script accepts answers within ~1% (or off by "
+       "x100) and ignores the predicted unit. Here every answer is graded by the **official, unit-aware scorer**, "
+       "twice: with the model's own arithmetic, and with **our Python executor** running the model's equation.\n\n"
+       "Same 200 dev questions as notebooks 01 and 05. Rough time on a T4: model download ~5 min, answering ~25 min."),
+    code(SETUP),
+    code('import json\n'
+         'from finsight import tatllm\n\n'
+         'MODEL_ID = "next-tat/tat-llm-7b-fft"    # or "next-tat/tat-llm-13b-fft" (slower, use batch_size=2)\n'
+         'N = 200\n'
+         'eval_qs = sample(q_dev, N)                # same sample as notebooks 01 and 05\n'
+         'name = MODEL_ID.split("/")[-1]\n'
+         'model, tok = tatllm.load(MODEL_ID)\n'
+         'raw = tatllm.predict(model, tok, docs_dev, eval_qs, f"{OUT}/{name}_dev{N}.jsonl", batch_size=4)'),
+    md("## Official scores: model's own arithmetic vs. our executor"),
+    code('RESULTS = {}\n'
+         'base_file = f"{OUT}/zeroshot_Qwen2.5-7B-Instruct_dev{N}.jsonl"\n'
+         'if os.path.exists(base_file):\n'
+         '    base = {json.loads(l)["uid"]: json.loads(l) for l in open(base_file)}\n'
+         '    RESULTS["Qwen2.5-7B untrained, our format (notebook 01)"] = score(eval_qs, base)\n'
+         'own = tatllm.score_outputs(raw, use_executor=False)\n'
+         'exe = tatllm.score_outputs(raw, use_executor=True)\n'
+         'RESULTS[f"{name}, model\'s own arithmetic"] = score(eval_qs, own)\n'
+         'RESULTS[f"{name} + our Python executor"] = score(eval_qs, exe)\n'
+         'for label, r in RESULTS.items():\n'
+         '    print_report(r, label)\n'
+         'json.dump({k: {m: v for m, v in r.items() if m != "rows"} for k, r in RESULTS.items()},\n'
+         '          open(f"{OUT}/{name}_comparison_dev{N}.json", "w"), indent=1)'),
+    md("## Look at mistakes (with the executor)"),
+    code('rows = {r["uid"]: r for r in RESULTS[f"{name} + our Python executor"]["rows"]}\n'
+         'wrong = [q for q in eval_qs if rows[q["uid"]]["em"] == 0]\n'
+         'print(len(wrong), "wrong of", len(eval_qs))\n'
+         'for q in wrong[:10]:\n'
+         '    p = exe[q["uid"]]\n'
+         '    print(f"[{q[\'answer_type\']}] {q[\'question\']}")\n'
+         '    print(f"   gold: {q[\'answer\']} ({q[\'scale\']}) | derivation {q[\'derivation\']!r}")\n'
+         '    print(f"   pred: {p[\'answer\']} ({p[\'scale\']})")\n'
+         '    print("   raw:", p["raw"].replace(chr(10), " / ")[:400], "\\n")'),
+])
+
 os.makedirs(os.path.join(ROOT, "notebooks"), exist_ok=True)
 for name, nb in (("01_zero_shot_baseline.ipynb", baseline), ("02_finetune_and_eval.ipynb", finetune),
                  ("03_trust_and_reinforce.ipynb", trust), ("04_demo_app.ipynb", demo),
-                 ("05_no_finetune_model_comparison.ipynb", nofinetune)):
+                 ("05_no_finetune_model_comparison.ipynb", nofinetune),
+                 ("06_tatllm_with_executor.ipynb", tatllm_nb)):
     with open(os.path.join(ROOT, "notebooks", name), "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=1)
     print("wrote notebooks/" + name)

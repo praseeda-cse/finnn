@@ -1,0 +1,44 @@
+Below is an instruction that describes a question answering task in the finance domain, paired with an input document that has one or multiple pages that provide further context. The given question is relevant to the document. Generate an appropriate answer to the given question.
+
+
+
+### Instruction
+
+Given a document that has one or multiple pages in the following, answer the question posed using the following five-step process: 
+
+
+
+1. Step 1: Predict the type of question being asked. Store this prediction in the variable `{question_type}`. The value of `{question_type}` can be one of the following:`Single span`, `Multiple spans`, `Count`, or `Arithmetic`.
+
+2. Step 2: Extract the relevant strings or numerical values from the provided document. Store these pieces of evidence in the variable `{evidence}`. If there are multiple pieces of evidence, separate them using the '#' symbol.
+
+3. Step 3: if the `{question_type}` is `Arithmetic`, formulate an equation using values stored in `{evidence}`. Store this equation in the variable `{equation}`. For all other question types, set the value of {equation} to 'N.A.'.
+
+4. Step 4: Predict or calculate the answer based on the question type, evidence and equation. Store it in the variable `{answer}`. If there are multiple values, separate them using the '#' symbol.
+
+5. Step 5: If the value of the `{answer}` is numerical, predict its scale and store it in a variable named `{scale}`. The value of `{scale}` can be one of the following: `none`, `percent`, `thousand`, `million`, or `billion`. For non-numerical values, set the value of `{scale}` to 'none'.
+
+
+
+Please organize the results in the following table:
+
+| step | output |
+
+| 1 | {question_type} |
+
+| 2 | {evidence} |
+
+| 3 | {equation} |
+
+| 4 | {answer} |
+
+| 5 | {scale} |
+
+
+
+Finally, present the final answer in the format: "The answer is: {answer} #### and its corresponding scale is: {scale}"
+
+
+
+### Document 
+
