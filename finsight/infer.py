@@ -46,24 +46,28 @@ def _read_done(path):
     return done
 
 
-def _prompts(tok, docs, questions, few_shot=False):
+def _prompts(tok, docs, questions, few_shot=False, examples_fn=None, template_kwargs=None):
+    """examples_fn(question) -> list of solved examples (see examples.py); template_kwargs are passed
+    to the chat template, e.g. {"enable_thinking": False} for Qwen3."""
     rendered, prompts = {}, []
     for q in questions:
         if q["doc_uid"] not in rendered:
             rendered[q["doc_uid"]] = render_doc(docs[q["doc_uid"]])
-        msgs = build_messages(rendered[q["doc_uid"]], q["question"], few_shot=few_shot)
-        prompts.append((q["uid"], tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)))
+        msgs = build_messages(rendered[q["doc_uid"]], q["question"], few_shot=few_shot,
+                              examples=examples_fn(q) if examples_fn else None)
+        prompts.append((q["uid"], tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True,
+                                                          **(template_kwargs or {}))))
     prompts.sort(key=lambda p: len(p[1]))  # similar lengths per batch = less padding
     return prompts
 
 
 @torch.no_grad()
 def sample(model, tok, docs, questions, out_path, k=5, temperature=0.7, top_p=0.95, batch_size=2,
-           max_new_tokens=160):
+           max_new_tokens=160, examples_fn=None, template_kwargs=None):
     """k sampled outputs per question, for voting (Step 5.6) and expert iteration (Step 4.5).
     Returns {uid: [raw text, ...]}; resumable like predict()."""
     done = {uid: row["samples"] for uid, row in _read_done(out_path).items()}
-    prompts = _prompts(tok, docs, [q for q in questions if q["uid"] not in done])
+    prompts = _prompts(tok, docs, [q for q in questions if q["uid"] not in done], False, examples_fn, template_kwargs)
     with open(out_path, "a", encoding="utf-8") as f:
         for i in range(0, len(prompts), batch_size):
             batch = prompts[i:i + batch_size]
@@ -81,10 +85,12 @@ def sample(model, tok, docs, questions, out_path, k=5, temperature=0.7, top_p=0.
 
 
 @torch.no_grad()
-def predict(model, tok, docs, questions, out_path, few_shot=False, batch_size=8, max_new_tokens=160):
+def predict(model, tok, docs, questions, out_path, few_shot=False, batch_size=8, max_new_tokens=160,
+            examples_fn=None, template_kwargs=None):
     """Returns {uid: {"answer", "scale", "evidence", "type", "raw"}} for all questions."""
     done = _read_done(out_path)
-    prompts = _prompts(tok, docs, [q for q in questions if q["uid"] not in done], few_shot)
+    prompts = _prompts(tok, docs, [q for q in questions if q["uid"] not in done], few_shot, examples_fn,
+                       template_kwargs)
 
     with open(out_path, "a", encoding="utf-8") as f:
         for i in range(0, len(prompts), batch_size):

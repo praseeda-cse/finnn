@@ -43,11 +43,13 @@ def user_message(context, question):
     return f"Document:\n{context}\n\nQuestion: {question}"
 
 
-def build_messages(context, question, few_shot=False):
+def build_messages(context, question, few_shot=False, examples=None):
+    """examples: optional list of (context, question, answer) solved examples, e.g. retrieved
+    from the training set (examples.py); they replace the two fixed FEW_SHOT examples."""
     msgs = [{"role": "system", "content": SYSTEM}]
-    if few_shot:
-        for ctx, q, a in FEW_SHOT:
-            msgs += [{"role": "user", "content": user_message(ctx, q)}, {"role": "assistant", "content": a}]
+    shots = examples if examples is not None else (FEW_SHOT if few_shot else [])
+    for ctx, q, a in shots:
+        msgs += [{"role": "user", "content": user_message(ctx, q)}, {"role": "assistant", "content": a}]
     msgs.append({"role": "user", "content": user_message(context, question)})
     return msgs
 

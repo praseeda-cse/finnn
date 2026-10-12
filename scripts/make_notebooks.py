@@ -228,9 +228,62 @@ demo = notebook([
          'app.launch(share=True)   # opens inside the notebook; the public link works for about 72 h'),
 ])
 
+nofinetune = notebook([
+    md("# 05 · No fine-tuning: model comparison with retrieved examples\n\n"
+       "No training at all. For every question, the 4 most similar **training** questions are shown to the model as "
+       "solved examples (their evidence rows, unit rows and correct 4-line answer). The model learns the dataset's "
+       "answer-type and unit conventions from them. Python still computes every number.\n\n"
+       "Same 200 dev questions as notebook 01 (where Qwen2.5-7B with 2 fixed examples scored **42.0 EM**), so the "
+       "numbers are directly comparable.\n\n"
+       "Run the cells **one at a time**. Each model cell takes roughly 20–60 min on a T4 and resumes after a "
+       "disconnect (re-run setup, the helper cell, then the same model cell)."),
+    code(SETUP),
+    code('import gc, json\n'
+         'from finsight.examples import ExampleRetriever\n\n'
+         'N = 200\n'
+         'eval_qs = sample(q_dev, N)                 # same sample as notebook 01 (seed 0)\n'
+         'retriever = ExampleRetriever(docs_train, q_train)\n'
+         'examples_fn = lambda q: retriever(q, k=4)\n'
+         'RESULTS = {}\n'
+         'base_file = f"{OUT}/zeroshot_Qwen2.5-7B-Instruct_dev{N}.jsonl"\n'
+         'if os.path.exists(base_file):\n'
+         '    base = {json.loads(l)["uid"]: json.loads(l) for l in open(base_file)}\n'
+         '    RESULTS["Qwen2.5-7B, 2 fixed examples (notebook 01)"] = score(eval_qs, base)\n\n'
+         'def run(model_id, batch_size=4, template_kwargs=None, label=None):\n'
+         '    name = model_id.split("/")[-1]\n'
+         '    model, tok = load_model(model_id)\n'
+         '    preds = predict(model, tok, docs_dev, eval_qs, f"{OUT}/noft_{name}_retrieved4_dev{N}.jsonl",\n'
+         '                    batch_size=batch_size, examples_fn=examples_fn, template_kwargs=template_kwargs)\n'
+         '    res = score(eval_qs, preds)\n'
+         '    RESULTS[label or f"{name}, 4 retrieved examples"] = res\n'
+         '    print_report(res, label or name)\n'
+         '    del model; gc.collect(); torch.cuda.empty_cache()\n'
+         '    return preds'),
+    md("## Model A · Qwen2.5-7B-Instruct + retrieved examples\n"
+       "Same model as notebook 01, so this shows what the retrieved examples alone add."),
+    code('preds_a = run("Qwen/Qwen2.5-7B-Instruct", batch_size=4)'),
+    md("## Model B · Qwen3-8B (thinking turned off)"),
+    code('preds_b = run("Qwen/Qwen3-8B", batch_size=4, template_kwargs={"enable_thinking": False})'),
+    md("## Model C · Qwen2.5-14B-Instruct (largest that fits a free T4 in 4-bit; slowest)"),
+    code('preds_c = run("Qwen/Qwen2.5-14B-Instruct", batch_size=2)'),
+    md("## Comparison table"),
+    code('rows = []\n'
+         'for label, r in RESULTS.items():\n'
+         '    rows.append([label, f"{r[\'EM\']:.1f}", f"{r[\'F1\']:.1f}", f"{r[\'scale_acc\']:.1f}",\n'
+         '                 f"{r.get(\'arithmetic_EM\', 0):.1f}", f"{r.get(\'span_EM\', 0):.1f}",\n'
+         '                 f"{r[\'evidence_recall\']:.0f}/{r[\'evidence_precision\']:.0f}"])\n'
+         'head = ["setup", "EM", "F1", "unit acc", "arith EM", "span EM", "evid R/P"]\n'
+         'w = [max(len(str(x)) for x in col) for col in zip(head, *rows)]\n'
+         'for row in [head] + rows:\n'
+         '    print("  ".join(str(x).ljust(n) for x, n in zip(row, w)))\n'
+         'json.dump({k: {m: v for m, v in r.items() if m != "rows"} for k, r in RESULTS.items()},\n'
+         '          open(f"{OUT}/noft_comparison_dev{N}.json", "w"), indent=1)'),
+])
+
 os.makedirs(os.path.join(ROOT, "notebooks"), exist_ok=True)
 for name, nb in (("01_zero_shot_baseline.ipynb", baseline), ("02_finetune_and_eval.ipynb", finetune),
-                 ("03_trust_and_reinforce.ipynb", trust), ("04_demo_app.ipynb", demo)):
+                 ("03_trust_and_reinforce.ipynb", trust), ("04_demo_app.ipynb", demo),
+                 ("05_no_finetune_model_comparison.ipynb", nofinetune)):
     with open(os.path.join(ROOT, "notebooks", name), "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=1)
     print("wrote notebooks/" + name)
