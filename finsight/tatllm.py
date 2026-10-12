@@ -133,12 +133,23 @@ def predict(model, tok, docs, questions, out_path, batch_size=4, max_new_tokens=
             done[row["uid"]] = row
     todo = [(q["uid"], build_input(tok, docs[q["doc_uid"]], q["question"])) for q in questions if q["uid"] not in done]
     todo.sort(key=lambda x: len(x[1]))
+    def generate(batch):
+        """Generate for a batch; on GPU out-of-memory (long documents), retry in halves."""
+        try:
+            enc = tok([p for _, p in batch], return_tensors="pt", padding=True).to(model.device)
+            gen = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False, pad_token_id=tok.pad_token_id)
+            return tok.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            if len(batch) == 1:
+                raise
+            half = len(batch) // 2
+            return generate(batch[:half]) + generate(batch[half:])
+
     with open(out_path, "a", encoding="utf-8") as f:
         for i in range(0, len(todo), batch_size):
             batch = todo[i:i + batch_size]
-            enc = tok([p for _, p in batch], return_tensors="pt", padding=True).to(model.device)
-            gen = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False, pad_token_id=tok.pad_token_id)
-            texts = tok.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
+            texts = generate(batch)
             for (uid, _), text in zip(batch, texts):
                 done[uid] = {"uid": uid, "raw": text}
                 f.write(json.dumps(done[uid], ensure_ascii=False) + "\n")
