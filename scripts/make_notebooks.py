@@ -133,6 +133,14 @@ pipeline = notebook([
          'for label, r in RESULTS.items():\n'
          '    print(f"  {r[\'EM\']:6.2f} EM  {r[\'F1\']:6.2f} F1  unit {r[\'scale_acc\']:5.1f}  {label}")\n'
          'json.dump({k: report_row(r) for k, r in RESULTS.items()}, open(f"{OUT}/finsight_dev{N}_results.json", "w"), indent=1)'),
+    md("## Error breakdown: which fix would gain the most?\n"
+       "For every wrong answer, checks whether fixing only the unit, the sign, a x100 factor or rounding would make "
+       "it correct. Send this table: it decides the next improvement."),
+    code('from finsight.analysis import error_breakdown, print_breakdown\n'
+         'for label, p in ((f"{name} + executor", exe), ("+ voting", voted)):\n'
+         '    r = score(eval_qs, p)\n'
+         '    print(f"\\n=== {label} ===")\n'
+         '    print_breakdown(error_breakdown(eval_qs, p, r["rows"]), len(eval_qs))'),
     code('# Mistakes of the best setup\n'
          'result, preds = RESULTS[f"{name} + executor + voting (k={K}) (ours)"], voted\n' + SHOW_ERRORS),
     md("## Part C · Final run on the official TEST set (run once, at the end)\n"

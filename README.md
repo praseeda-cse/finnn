@@ -26,6 +26,7 @@ Its prompt is rebuilt exactly as in the authors' released files (identical on al
 | `finsight/program.py` | safe expression evaluator (syntax-tree whitelist, no `eval`) |
 | `finsight/evaluate.py` | official scorer + per-type EM/F1 + evidence recall/precision |
 | `finsight/tatqa_metric.py`, `tatqa_utils.py` | **official** TAT-QA/TAT-DQA scorer (MIT, vendored) |
+| `finsight/analysis.py` | error breakdown: which single fix (unit, sign, x100, rounding) would make each wrong answer correct |
 | `finsight/demo.py` | read any digital PDF, answer, highlight evidence rows on the page |
 | `finsight/prompt.py`, `infer.py` | general-LLM baseline (notebook 01) |
 | `scripts/build_compact.py` | pack the TAT-DQA download → `data/*.json.gz` (19 MB) |
