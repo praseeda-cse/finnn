@@ -193,12 +193,70 @@ demo = notebook([
          'app.launch(share=True)   # opens inside the notebook; the public link works for about 72 h'),
 ])
 
+paper1 = notebook([
+    md("# 04 · Paper 1 follow-up: does the VLM fail to read, or fail to answer?\n\n"
+       "Qwen2-VL-2B on the **same 200 test questions** and the **same 150-DPI page images** as the original run, "
+       "scored with the official TAT-DQA scorer. Conditions:\n"
+       "- **A** original run (96 output tokens, prompt chosen by the gold answer type), loaded from file, no GPU\n"
+       "- **B** same prompts, **512** output tokens: does a longer budget fix arithmetic?\n"
+       "- **C** one **generic** prompt for every question (no gold information), 512 tokens\n"
+       "- **D** **structured** output: `Answer:` (value, or an arithmetic expression executed by Python) + `Unit:`\n\n"
+       "Runtime → Change runtime type → **T4 GPU** (L4/A100 is faster). Rough T4 time: 1.5–2.5 h in total; every "
+       "condition saves to Drive and resumes after a disconnect (re-run setup + model cell, then the same cell). "
+       "At the end, send `paper1_rerun_results.json` from `My Drive/finsight/runs/`."),
+    code(SETUP),
+    code('# Page images (150 DPI, as in the original run) + original outputs.\n'
+         '# Upload tatdqa_test_pages_150dpi.zip (83 MB, from the laptop: Desktop/oneee/final_year/) to My Drive/finsight/\n'
+         'import zipfile\n'
+         'PAGES = "/content/tatdqa_pages" if IN_COLAB else os.path.join(ROOT, "runs", "tatdqa_pages")\n'
+         'ZIP = "/content/drive/MyDrive/finsight/tatdqa_test_pages_150dpi.zip"\n'
+         'if not os.path.exists(f"{PAGES}/page_of_doc.json"):\n'
+         '    assert os.path.exists(ZIP), "Upload tatdqa_test_pages_150dpi.zip to My Drive/finsight/ first"\n'
+         '    zipfile.ZipFile(ZIP).extractall(PAGES)\n'
+         'page_of = json.load(open(f"{PAGES}/page_of_doc.json"))\n'
+         'old_raw = json.load(open(f"{PAGES}/old_run_raw.json", encoding="utf-8"))\n\n'
+         'N = 200\n'
+         'eval_qs = sample(q_test, N)                       # fixed sample (seed 0)\n'
+         'image_of = {q["uid"]: f"{PAGES}/pages/{q[\'doc_uid\']}_{page_of[q[\'doc_uid\']]}.png" for q in eval_qs}\n'
+         'gold_scale = {q["uid"]: q["scale"] for q in eval_qs}\n'
+         'print(len(eval_qs), "questions,", sum(os.path.exists(p) for p in image_of.values()), "page images found")'),
+    code('from finsight import vlm\n'
+         'model, processor = vlm.load()\n'
+         '# quick check on 2 questions before the long runs\n'
+         'print(vlm.run(model, processor, eval_qs[:2], image_of, "structured", "/tmp/check.jsonl", 64, batch_size=2))'),
+    code('RAW = {"A": {q["uid"]: old_raw[q["uid"]] for q in eval_qs}}\n'
+         'RAW["B"] = vlm.run(model, processor, eval_qs, image_of, "orig", f"{OUT}/p1_B_orig512.jsonl", 512)\n'
+         'RAW["C"] = vlm.run(model, processor, eval_qs, image_of, "generic", f"{OUT}/p1_C_generic512.jsonl", 512)\n'
+         'RAW["D"] = vlm.run(model, processor, eval_qs, image_of, "structured", f"{OUT}/p1_D_structured.jsonl", 128)'),
+    code('MODE = {"A": "orig", "B": "orig", "C": "generic", "D": "structured"}\n'
+         'NAME = {"A": "original (96 tokens, gold-type prompt)", "B": "512 tokens, gold-type prompt",\n'
+         '        "C": "512 tokens, generic prompt", "D": "structured: expression executed + unit"}\n'
+         'SUMMARY = {}\n'
+         'for k in "ABCD":\n'
+         '    p = vlm.to_preds(RAW[k], MODE[k])\n'
+         '    r = score(eval_qs, p)\n'
+         '    r_gold = score(eval_qs, vlm.to_preds(RAW[k], MODE[k], gold_scale))\n'
+         '    print_report(r, f"{k}: {NAME[k]}")\n'
+         '    SUMMARY[k] = {"name": NAME[k], "official": report_row(r), "gold_scale": report_row(r_gold),\n'
+         '                  "arithmetic_behaviour": vlm.behaviour(eval_qs, RAW[k], p),\n'
+         '                  "examples": [{"q": q["question"], "type": q["answer_type"], "gold": q["answer"], "scale": q["scale"],\n'
+         '                                "raw": RAW[k][q["uid"]][:600]} for q in eval_qs[:15]]}\n'
+         '    print("   arithmetic behaviour:", SUMMARY[k]["arithmetic_behaviour"], "\\n")\n'
+         'SUMMARY["gpu"] = torch.cuda.get_device_name(0)\n'
+         'json.dump(SUMMARY, open(f"{OUT}/paper1_rerun_results.json", "w"), indent=1, ensure_ascii=False)\n'
+         'print("saved", f"{OUT}/paper1_rerun_results.json")\n\n'
+         'print("\\nEM (official) / EM with gold unit:")\n'
+         'for k in "ABCD":\n'
+         '    s = SUMMARY[k]\n'
+         '    print(f"  {k}  {s[\'official\'][\'EM\']:5.1f} / {s[\'gold_scale\'][\'EM\']:5.1f}   {s[\'name\']}")'),
+])
+
 nb_dir = os.path.join(ROOT, "notebooks")
 os.makedirs(nb_dir, exist_ok=True)
 for old in glob.glob(os.path.join(nb_dir, "*.ipynb")):
     os.remove(old)
 for name, nb in (("01_baseline_general_llm.ipynb", baseline), ("02_finsight_pipeline.ipynb", pipeline),
-                 ("03_demo_app.ipynb", demo)):
+                 ("03_demo_app.ipynb", demo), ("04_paper1_vlm_rerun.ipynb", paper1)):
     with open(os.path.join(nb_dir, name), "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=1)
     print("wrote notebooks/" + name)
