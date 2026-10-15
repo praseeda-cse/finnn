@@ -145,9 +145,13 @@ pipeline = notebook([
     code('# Mistakes of the best setup\n'
          'result, preds = RESULTS[f"{name} + executor + voting (k={K}) (ours)"], voted\n' + SHOW_ERRORS),
     md("## Part C · Final run on the official TEST set (run once, at the end)\n"
-       "Greedy + executor on all 1,663 test questions (≈ 3–4 h on a T4). Set `VOTE = True` to add voting "
-       "(≈ 5x longer; only if you have the GPU time). Writes `test_official.json` in the official `{uid: [answer, scale]}` format."),
-    code('VOTE = False\n'
+       "**Switched off by default** so that *Run all* is safe. When the dev results are final, set `RUN_TEST = True` "
+       "and run this cell. Greedy + executor on all 1,663 test questions (≈ 3–4 h on a T4). Set `VOTE = True` to add "
+       "voting (≈ 5x longer). Writes `test_official.json` in the official `{uid: [answer, scale]}` format."),
+    code('RUN_TEST = False\n'
+         'VOTE = False\n'
+         'if not RUN_TEST:\n'
+         '    raise SystemExit("Part C skipped (RUN_TEST = False). The dev results above are complete.")\n'
          'doc_test = {q["uid"]: docs_test[q["doc_uid"]] for q in q_test}\n'
          'raw_t = tatllm.predict(model, tok, docs_test, q_test, f"{OUT}/{name}_test.jsonl")\n'
          'own_t = tatllm.score_outputs(raw_t, use_executor=False, doc_of=doc_test)\n'
