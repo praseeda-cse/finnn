@@ -131,39 +131,92 @@ def _read(out_path):
     return done
 
 
+# Each token of context keeps ~0.5 MB of attention cache in LLaMA-2-7B (no grouped-query attention),
+# so batches are sized by total tokens (prompt + answer) x sequences, not by a fixed count.
+TOKEN_BUDGET = 9000   # ~4.5 GB of cache next to the 4-bit 7B model on a 16 GB T4; use ~5000 for 13B
+
+
+def _free():
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
 @torch.no_grad()
-def _generate_all(model, tok, docs, questions, out_path, batch_size, max_new_tokens, k=1, temperature=None):
-    """Shared, resumable generation. k = 1 with temperature None: greedy, row {"uid", "raw"}.
-    Otherwise k samples per question, row {"uid", "samples": [...]}. Long batches that run out of
-    GPU memory are retried in halves."""
+def _generate(model, tok, prompts, gen_kwargs, n_return):
+    """One generate call; returns n_return texts per prompt, or None on GPU out-of-memory
+    (memory is released outside the except block, so a retry can use it)."""
+    try:
+        enc = tok(prompts, return_tensors="pt", padding=True).to(model.device)
+        gen = model.generate(**enc, **gen_kwargs, num_return_sequences=n_return)
+        texts = tok.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
+        del enc, gen
+        return texts
+    except torch.cuda.OutOfMemoryError:
+        oom = True
+    if oom:
+        _free()
+        return None
+
+
+def _batches(todo, lengths, cost_per_token, budget):
+    """Group consecutive prompts (sorted by length) so that sum(len + new) * cost stays in budget."""
+    batch, used = [], 0
+    for item in todo:
+        c = lengths[item[0]] * cost_per_token
+        if batch and used + c > budget:
+            yield batch
+            batch, used = [], 0
+        batch.append(item)
+        used += c
+    if batch:
+        yield batch
+
+
+def _generate_all(model, tok, docs, questions, out_path, max_new_tokens, k=1, temperature=None, budget=TOKEN_BUDGET):
+    """Shared, resumable generation. Greedy (temperature None): row {"uid", "raw"}.
+    Sampling: k answers per question, row {"uid", "samples": [...]}."""
     done = _read(out_path)
     todo = [(q["uid"], build_input(tok, docs[q["doc_uid"]], q["question"])) for q in questions if q["uid"] not in done]
-    todo.sort(key=lambda x: len(x[1]))
+    lengths = {uid: len(tok(p)["input_ids"]) + max_new_tokens for uid, p in todo}
+    todo.sort(key=lambda x: lengths[x[0]])
     gen_kwargs = {"max_new_tokens": max_new_tokens, "pad_token_id": tok.pad_token_id}
     if temperature is None:
         gen_kwargs["do_sample"] = False
     else:
-        gen_kwargs.update(do_sample=True, temperature=temperature, top_p=0.95, num_return_sequences=k)
+        gen_kwargs.update(do_sample=True, temperature=temperature, top_p=0.95)
 
-    def generate(batch):
-        try:
-            enc = tok([p for _, p in batch], return_tensors="pt", padding=True).to(model.device)
-            gen = model.generate(**enc, **gen_kwargs)
-            return tok.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
-        except torch.cuda.OutOfMemoryError:
-            torch.cuda.empty_cache()
+    def run_batch(batch, budget):
+        """Greedy: one call per batch (halving on OOM). Sampling: per question, k answers in chunks."""
+        if temperature is None:
+            texts = _generate(model, tok, [p for _, p in batch], gen_kwargs, 1)
+            if texts is not None:
+                return [[t] for t in texts]
             if len(batch) == 1:
-                raise
+                raise RuntimeError("Out of GPU memory on a single document; lower TOKEN_BUDGET or max_new_tokens")
             half = len(batch) // 2
-            return generate(batch[:half]) + generate(batch[half:])
+            return run_batch(batch[:half], budget) + run_batch(batch[half:], budget)
+        out = []
+        for uid, prompt in batch:
+            per_call = max(1, min(k, budget // lengths[uid]))
+            outs = []
+            while len(outs) < k:
+                n = min(per_call, k - len(outs))
+                texts = _generate(model, tok, [prompt], gen_kwargs, n)
+                if texts is None:
+                    if per_call == 1:
+                        raise RuntimeError("Out of GPU memory on a single sample; lower max_new_tokens")
+                    per_call = max(1, per_call // 2)
+                    continue
+                outs += texts
+            out.append(outs)
+        return out
 
-    per = 1 if temperature is None else k
+    cost = 1 if temperature is None else k
     with open(out_path, "a", encoding="utf-8") as f:
-        for i in range(0, len(todo), batch_size):
-            batch = todo[i:i + batch_size]
-            texts = generate(batch)
-            for j, (uid, _) in enumerate(batch):
-                outs = texts[j * per:(j + 1) * per]
+        for batch in _batches(todo, lengths, cost, budget):
+            results = run_batch(batch, budget)
+            for (uid, _), outs in zip(batch, results):
                 done[uid] = {"uid": uid, "raw": outs[0]} if temperature is None else {"uid": uid, "samples": outs}
                 f.write(json.dumps(done[uid], ensure_ascii=False) + "\n")
             f.flush()
@@ -172,14 +225,14 @@ def _generate_all(model, tok, docs, questions, out_path, batch_size, max_new_tok
     return done
 
 
-def predict(model, tok, docs, questions, out_path, batch_size=4, max_new_tokens=400):
+def predict(model, tok, docs, questions, out_path, max_new_tokens=400, budget=TOKEN_BUDGET, **_):
     """Greedy answers: {uid: {"uid", "raw"}}. Scored separately, with or without the executor."""
-    return _generate_all(model, tok, docs, questions, out_path, batch_size, max_new_tokens)
+    return _generate_all(model, tok, docs, questions, out_path, max_new_tokens, budget=budget)
 
 
-def sample(model, tok, docs, questions, out_path, k=5, temperature=0.7, batch_size=2, max_new_tokens=400):
+def sample(model, tok, docs, questions, out_path, k=5, temperature=0.7, max_new_tokens=400, budget=TOKEN_BUDGET, **_):
     """k sampled answers per question for self-consistency voting: {uid: {"uid", "samples"}}."""
-    return _generate_all(model, tok, docs, questions, out_path, batch_size, max_new_tokens, k, temperature)
+    return _generate_all(model, tok, docs, questions, out_path, max_new_tokens, k, temperature, budget)
 
 
 def score_outputs(raw_by_uid, use_executor=True, doc_of=None):

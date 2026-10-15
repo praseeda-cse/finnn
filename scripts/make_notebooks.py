@@ -10,6 +10,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 SETUP = r'''# --- Setup: on Colab, gets the latest code + data from GitHub; also works on a local GPU ---
 import os, sys, subprocess, shutil, random
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")   # less GPU memory fragmentation
 IN_COLAB = os.path.exists("/content")
 if IN_COLAB:
     ROOT = "/content/finnn"
@@ -103,14 +104,14 @@ pipeline = notebook([
        "Every part saves to Drive and resumes after a disconnect (re-run setup, the model cell, then the same cell)."),
     code(SETUP),
     code('from finsight import tatllm\n\n'
-         'MODEL_ID = "next-tat/tat-llm-7b-fft"    # or "next-tat/tat-llm-13b-fft" (slower; use batch_size=2)\n'
+         'MODEL_ID = "next-tat/tat-llm-7b-fft"    # or "next-tat/tat-llm-13b-fft" (slower; then set tatllm.TOKEN_BUDGET = 5000)\n'
          'name = MODEL_ID.split("/")[-1]\n'
          'model, tok = tatllm.load(MODEL_ID)'),
     md("## Part A · Greedy answers: model's own arithmetic vs. our executor (dev sample)"),
     code('N = 200\n'
          'eval_qs = sample(q_dev, N)                # same sample as notebook 01\n'
          'doc_of = {q["uid"]: docs_dev[q["doc_uid"]] for q in eval_qs}\n'
-         'raw = tatllm.predict(model, tok, docs_dev, eval_qs, f"{OUT}/{name}_dev{N}.jsonl", batch_size=4)\n\n'
+         'raw = tatllm.predict(model, tok, docs_dev, eval_qs, f"{OUT}/{name}_dev{N}.jsonl")\n\n'
          'RESULTS = {}\n'
          'base_file = f"{OUT}/zeroshot_Qwen2.5-7B-Instruct_dev{N}.jsonl"\n'
          'if os.path.exists(base_file):\n'
@@ -124,7 +125,7 @@ pipeline = notebook([
          '    print_report(r, label)'),
     md("## Part B · Self-consistency voting (dev sample)"),
     code('K = 5\n'
-         'samples = tatllm.sample(model, tok, docs_dev, eval_qs, f"{OUT}/{name}_dev{N}_k{K}.jsonl", k=K, batch_size=2)\n'
+         'samples = tatllm.sample(model, tok, docs_dev, eval_qs, f"{OUT}/{name}_dev{N}_k{K}.jsonl", k=K)\n'
          'voted = {q["uid"]: tatllm.vote(samples[q["uid"]]["samples"], raw[q["uid"]]["raw"], doc_of[q["uid"]])\n'
          '         for q in eval_qs}\n'
          'RESULTS[f"{name} + executor + voting (k={K}) (ours)"] = score(eval_qs, voted)\n'
@@ -148,12 +149,12 @@ pipeline = notebook([
        "(≈ 5x longer; only if you have the GPU time). Writes `test_official.json` in the official `{uid: [answer, scale]}` format."),
     code('VOTE = False\n'
          'doc_test = {q["uid"]: docs_test[q["doc_uid"]] for q in q_test}\n'
-         'raw_t = tatllm.predict(model, tok, docs_test, q_test, f"{OUT}/{name}_test.jsonl", batch_size=4)\n'
+         'raw_t = tatllm.predict(model, tok, docs_test, q_test, f"{OUT}/{name}_test.jsonl")\n'
          'own_t = tatllm.score_outputs(raw_t, use_executor=False, doc_of=doc_test)\n'
          'final_t = tatllm.score_outputs(raw_t, use_executor=True, doc_of=doc_test)\n'
          'TEST = {f"{name}: model\'s own arithmetic": score(q_test, own_t), f"{name} + executor (ours)": score(q_test, final_t)}\n'
          'if VOTE:\n'
-         '    s_t = tatllm.sample(model, tok, docs_test, q_test, f"{OUT}/{name}_test_k5.jsonl", k=5, batch_size=2)\n'
+         '    s_t = tatllm.sample(model, tok, docs_test, q_test, f"{OUT}/{name}_test_k5.jsonl", k=5)\n'
          '    final_t = {q["uid"]: tatllm.vote(s_t[q["uid"]]["samples"], raw_t[q["uid"]]["raw"], doc_test[q["uid"]]) for q in q_test}\n'
          '    TEST[f"{name} + executor + voting (ours)"] = score(q_test, final_t)\n'
          'for label, r in TEST.items():\n'
