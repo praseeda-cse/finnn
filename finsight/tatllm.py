@@ -122,22 +122,33 @@ def load(model_id="next-tat/tat-llm-7b-fft", four_bit=True):
     return model, tok
 
 
-@torch.no_grad()
-def predict(model, tok, docs, questions, out_path, batch_size=4, max_new_tokens=400):
-    """Greedy generation, resumable: {uid: {"raw", "parsed"}}; scoring is done separately so the
-    same outputs can be scored with and without the executor."""
+def _read(out_path):
     done = {}
     if os.path.exists(out_path):
         for line in open(out_path, encoding="utf-8"):
             row = json.loads(line)
             done[row["uid"]] = row
+    return done
+
+
+@torch.no_grad()
+def _generate_all(model, tok, docs, questions, out_path, batch_size, max_new_tokens, k=1, temperature=None):
+    """Shared, resumable generation. k = 1 with temperature None: greedy, row {"uid", "raw"}.
+    Otherwise k samples per question, row {"uid", "samples": [...]}. Long batches that run out of
+    GPU memory are retried in halves."""
+    done = _read(out_path)
     todo = [(q["uid"], build_input(tok, docs[q["doc_uid"]], q["question"])) for q in questions if q["uid"] not in done]
     todo.sort(key=lambda x: len(x[1]))
+    gen_kwargs = {"max_new_tokens": max_new_tokens, "pad_token_id": tok.pad_token_id}
+    if temperature is None:
+        gen_kwargs["do_sample"] = False
+    else:
+        gen_kwargs.update(do_sample=True, temperature=temperature, top_p=0.95, num_return_sequences=k)
+
     def generate(batch):
-        """Generate for a batch; on GPU out-of-memory (long documents), retry in halves."""
         try:
             enc = tok([p for _, p in batch], return_tensors="pt", padding=True).to(model.device)
-            gen = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False, pad_token_id=tok.pad_token_id)
+            gen = model.generate(**enc, **gen_kwargs)
             return tok.batch_decode(gen[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
@@ -146,24 +157,95 @@ def predict(model, tok, docs, questions, out_path, batch_size=4, max_new_tokens=
             half = len(batch) // 2
             return generate(batch[:half]) + generate(batch[half:])
 
+    per = 1 if temperature is None else k
     with open(out_path, "a", encoding="utf-8") as f:
         for i in range(0, len(todo), batch_size):
             batch = todo[i:i + batch_size]
             texts = generate(batch)
-            for (uid, _), text in zip(batch, texts):
-                done[uid] = {"uid": uid, "raw": text}
+            for j, (uid, _) in enumerate(batch):
+                outs = texts[j * per:(j + 1) * per]
+                done[uid] = {"uid": uid, "raw": outs[0]} if temperature is None else {"uid": uid, "samples": outs}
                 f.write(json.dumps(done[uid], ensure_ascii=False) + "\n")
             f.flush()
-            print(f"\r{len(done)}/{len(questions)} predicted", end="")
+            print(f"\r{len(done)}/{len(questions)} done", end="")
     print()
     return done
 
 
-def score_outputs(raw_by_uid, use_executor=True):
-    """{uid: raw} -> predictions dict in the format of evaluate.score."""
+def predict(model, tok, docs, questions, out_path, batch_size=4, max_new_tokens=400):
+    """Greedy answers: {uid: {"uid", "raw"}}. Scored separately, with or without the executor."""
+    return _generate_all(model, tok, docs, questions, out_path, batch_size, max_new_tokens)
+
+
+def sample(model, tok, docs, questions, out_path, k=5, temperature=0.7, batch_size=2, max_new_tokens=400):
+    """k sampled answers per question for self-consistency voting: {uid: {"uid", "samples"}}."""
+    return _generate_all(model, tok, docs, questions, out_path, batch_size, max_new_tokens, k, temperature)
+
+
+def score_outputs(raw_by_uid, use_executor=True, doc_of=None):
+    """{uid: {"raw"}} -> predictions dict in the format of evaluate.score.
+    doc_of: optional {uid: doc}; then evidence rows are grounded for evidence recall / precision."""
     preds = {}
     for uid, row in raw_by_uid.items():
         p = parse(row["raw"])
         answer, scale = to_prediction(p, use_executor)
-        preds[uid] = {"answer": answer, "scale": scale, "evidence": [], "type": p["type"], "raw": row["raw"]}
+        evidence = ground(doc_of[uid], p)[0] if doc_of else []
+        preds[uid] = {"answer": answer, "scale": scale, "evidence": evidence, "type": p["type"], "raw": row["raw"]}
     return preds
+
+
+def _key(answer, scale):
+    from .tatqa_utils import normalize_answer
+    return tuple(sorted(normalize_answer(str(a)) for a in answer)), scale
+
+
+def vote(raws, greedy_raw=None, doc=None):
+    """Self-consistency: execute every sampled answer and return the most common (answer, scale).
+    The greedy answer, if given, joins the vote and wins ties. Also returns the agreement share,
+    usable as a confidence score."""
+    from collections import Counter
+    candidates = ([greedy_raw] if greedy_raw else []) + list(raws)
+    preds = []
+    for raw in candidates:
+        answer, scale = to_prediction(parse(raw), True)
+        if answer:
+            preds.append((_key(answer, scale), answer, scale, raw))
+    if not preds:
+        return {"answer": [], "scale": "", "evidence": [], "raw": candidates[0] if candidates else "", "agreement": 0.0}
+    counts = Counter(k for k, *_ in preds)
+    best = max(counts, key=lambda k: (counts[k], k == preds[0][0]))  # ties -> greedy's answer
+    _, answer, scale, raw = next(p for p in preds if p[0] == best)
+    evidence = ground(doc, parse(raw))[0] if doc else []
+    return {"answer": answer, "scale": scale, "evidence": evidence, "raw": raw, "agreement": counts[best] / len(candidates)}
+
+
+def ground(doc, parsed):
+    """Block ids that contain the model's evidence strings (or the numbers of its equation), for
+    highlighting the evidence on the page and checking that operands exist in the document."""
+    blocks = [b for p in doc["pages"] for b in p["blocks"]]
+    num = lambda s: s.replace(",", "").strip("$%().")
+    tokens = {b["id"]: {num(w) for w in b["words"]} for b in blocks}
+    texts = {b["id"]: " ".join(b["words"]).lower() for b in blocks}
+    keys = []  # (kind, value): numbers match whole tokens, text matches substrings
+    for e in parsed["evidence_text"]:
+        e = e.strip()
+        if re.fullmatch(r"[-$(]*[\d,]+\.?\d*[%)]*", e):
+            keys.append(("num", num(e)))
+        elif len(e) > 2:
+            keys.append(("text", e.lower()))
+    keys += [("num", n.rstrip(".")) for n in re.findall(r"\d[\d.]*", _clean_equation(parsed["equation"]))]
+    keys = list(dict.fromkeys(k for k in keys if k[1]))
+    hit = lambda bid, k: k[1] in tokens[bid] if k[0] == "num" else k[1] in texts[bid]
+    found = all(any(hit(b, k) for b in tokens) for k in keys)
+    cover = {b: sum(hit(b, k) for k in keys) for b in tokens}
+    best = max(cover.values(), default=0)
+    if best == 0:
+        return [], found
+    if best > 1:   # rows holding several evidence values together are the evidence
+        return sorted(b for b, c in cover.items() if c == best), found
+    ids = set()    # otherwise the first row holding each value
+    for k in keys:
+        first = next((b for b in tokens if hit(b, k)), None)
+        if first is not None:
+            ids.add(first)
+    return sorted(ids), found

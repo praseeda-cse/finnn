@@ -1,12 +1,11 @@
-"""Step 5.8: demo helpers. Read any digital PDF into the same block format as TAT-DQA,
-answer a question with the fine-tuned model, and draw the cited evidence on the page."""
+"""Demo helpers. Read any digital PDF into the same block format as TAT-DQA, answer a question
+with TAT-LLM + the Python executor, and draw the grounded evidence rows on the page."""
 import html
 
 import torch
 
-from .data import render_doc
-from .prompt import build_messages, parse_output, to_prediction
-from .verify import verify
+from . import tatllm
+from .data import block_text
 
 TARGET_WIDTH = 1240  # TAT-DQA page coordinate width; column-gap threshold is tuned for it
 
@@ -44,16 +43,15 @@ def doc_from_pdf(path, max_pages=3):
 
 
 @torch.no_grad()
-def answer(model, tok, doc, question, max_new_tokens=160):
-    msgs = build_messages(render_doc(doc), question)
-    prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
-    enc = tok(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
+def answer(model, tok, doc, question, max_new_tokens=400):
+    prompt = tatllm.build_input(tok, doc, question)
+    enc = tok(prompt, return_tensors="pt").to(model.device)
     out = model.generate(**enc, max_new_tokens=max_new_tokens, do_sample=False, pad_token_id=tok.pad_token_id)
     raw = tok.decode(out[0, enc["input_ids"].shape[1]:], skip_special_tokens=True)
-    parsed = parse_output(raw)
-    ans, scale = to_prediction(parsed)
-    checks, vscore = verify(parsed, {"question": question}, doc)
-    return {"answer": ans, "scale": scale, "parsed": parsed, "checks": checks, "verify_score": vscore, "raw": raw}
+    parsed = tatllm.parse(raw)
+    ans, scale = tatllm.to_prediction(parsed, use_executor=True)
+    evidence, found = tatllm.ground(doc, parsed)
+    return {"answer": ans, "scale": scale, "parsed": parsed, "evidence": evidence, "grounded": found, "raw": raw}
 
 
 def highlight_pages(path, doc, scales, evidence, zoom=1.5):
@@ -79,14 +77,12 @@ def highlight_pages(path, doc, scales, evidence, zoom=1.5):
 def explain_html(result, doc):
     p = result["parsed"]
     by_id = {b["id"]: b for pg in doc["pages"] for b in pg["blocks"]}
-    from .data import block_text
-    ev_lines = "".join(f"<li><code>[{i}] {html.escape(block_text(by_id[i]))}</code></li>" for i in p["evidence"] if i in by_id)
-    checks = " · ".join(f"{k}: {'✅' if v else '❌'}" for k, v in result["checks"].items() if v is not None)
-    how = (f"<b>Formula (computed by Python):</b> <code>{html.escape(p['program'])}</code>" if p["program"]
-           else f"<b>Items counted:</b> {html.escape(str(p['items']))}" if p["items"] is not None
-           else "<b>Copied from the document.</b>")
+    ev_lines = "".join(f"<li><code>[{i}] {html.escape(block_text(by_id[i]))}</code></li>" for i in result["evidence"] if i in by_id)
+    how = (f"<b>Equation (computed by Python):</b> <code>{html.escape(p['equation'])}</code>"
+           if p["type"] == "arithmetic" else f"<b>Evidence values:</b> {html.escape(' # '.join(p['evidence_text']))}")
     ans = ", ".join(result["answer"]) or "(no valid answer)"
+    check = "✅ all evidence values found in the document" if result["grounded"] else "⚠️ some evidence values were not found in the document"
     return (f"<h3>Answer: {html.escape(ans)} {html.escape(result['scale'])}</h3>"
-            f"<p><b>Type:</b> {html.escape(p['type'])}<br/>{how}</p>"
-            f"<p><b>Evidence used:</b></p><ul>{ev_lines or '<li>none cited</li>'}</ul>"
-            f"<p><b>Checks:</b> {checks} &nbsp;(verification score {result['verify_score']:.2f})</p>")
+            f"<p><b>Question type:</b> {html.escape(p['type'] or 'unknown')}<br/>{how}</p>"
+            f"<p><b>Evidence rows (highlighted on the page):</b></p><ul>{ev_lines or '<li>none found</li>'}</ul>"
+            f"<p>{check}</p>")
