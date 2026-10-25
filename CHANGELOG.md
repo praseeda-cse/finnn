@@ -2,6 +2,15 @@
 
 Versions are git tags (`git tag`); each line links to the commits that made it.
 
+## v0.5 (2026-10-25): final pipeline
+- Example RAG over the training split (question template + same-unit bonus, tuned on dev with
+  `scripts/retrieval_check.py`): retrieved examples match the question's calculation 53.0% vs 46.2% before.
+- `solve.py`: any open LLM via `llm.py` (Ollama / vLLM / llama.cpp), executor, grounding check, weighted
+  ensemble with TAT-LLM-7B and voting only where they disagree; gold answers through it score 99.64% EM on dev.
+- `risk.py`: automatic risk report (7 risk questions, row-verified values, ratios in Python, large-change scan).
+- Notebook 05 for Kaggle (2 x T4, free): model choice, ablation, ensemble, risk, single test run, demo app.
+- Design document `docs/FINAL_PIPELINE.md`.
+
 ## v0.4 (2026-10-25)
 - Installation guide, `requirements.txt`, MIT licence, this changelog.
 - User study: use case and user groups, 19-question survey, Apps Script that builds the Google Form

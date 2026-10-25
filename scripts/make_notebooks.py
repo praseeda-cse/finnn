@@ -255,12 +255,276 @@ paper1 = notebook([
          '    print(f"  {k}  {s[\'official\'][\'EM\']:5.1f} / {s[\'gold_scale\'][\'EM\']:5.1f}   {s[\'name\']}")'),
 ])
 
+SETUP_FINAL = r'''# --- Setup: Kaggle (recommended, 2 x T4) or Colab (1 x T4: models up to ~14B) ---
+import os, sys, subprocess, shutil, random, json, time, glob
+IN_KAGGLE = os.path.exists("/kaggle/working")
+IN_COLAB = os.path.exists("/content") and not IN_KAGGLE
+BASE = "/kaggle/working" if IN_KAGGLE else "/content" if IN_COLAB else os.path.abspath("..")
+ROOT = f"{BASE}/finnn" if (IN_KAGGLE or IN_COLAB) else BASE
+if IN_KAGGLE or IN_COLAB:
+    shutil.rmtree(ROOT, ignore_errors=True)               # always fetch the latest code
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "https://github.com/praseeda-cse/finnn.git", ROOT], check=True)
+OUT = f"{BASE}/runs"
+if IN_COLAB:
+    from google.colab import drive
+    drive.mount("/content/drive")
+    OUT = "/content/drive/MyDrive/finsight/runs"
+os.makedirs(OUT, exist_ok=True)
+if IN_KAGGLE:                                             # earlier results uploaded as a Kaggle dataset
+    for f in glob.glob("/kaggle/input/*/*.jsonl") + glob.glob("/kaggle/input/*/*/*.jsonl"):
+        if not os.path.exists(f"{OUT}/{os.path.basename(f)}"):
+            shutil.copy(f, OUT)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pymupdf", "gradio"], check=True)
+sys.path.insert(0, ROOT)
+
+from finsight.data import load_split
+from finsight.evaluate import score, print_report
+docs_train, q_train = load_split(f"{ROOT}/data/tatdqa_train.json.gz")
+docs_dev, q_dev = load_split(f"{ROOT}/data/tatdqa_dev.json.gz")
+docs_test, q_test = load_split(f"{ROOT}/data/tatdqa_test.json.gz")
+def sample(questions, n, seed=0):
+    return random.Random(seed).sample(questions, n) if n < len(questions) else questions
+def read_jsonl(path):
+    return {json.loads(l)["uid"]: json.loads(l) for l in open(path, encoding="utf-8")} if os.path.exists(path) else {}
+def report_row(r):
+    return {m: v for m, v in r.items() if m != "rows"}
+print(subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True).stdout)
+print("results folder:", OUT, "|", sorted(os.listdir(OUT))[:20])'''
+
+SERVER = r'''# --- Open models served locally by Ollama (llama.cpp inside; works on T4 GPUs; no API key, no cost) ---
+import requests
+from finsight.llm import ChatClient
+PARALLEL = 2          # requests at once: 2 for ~32B models on 2 x T4, 4 for <=14B models
+THINK = False         # Qwen3 models: False adds /no_think (much faster); True lets them reason first
+if shutil.which("ollama") is None:
+    subprocess.run("curl -fsSL https://ollama.com/install.sh | sh", shell=True, check=True)
+env = dict(os.environ, OLLAMA_CONTEXT_LENGTH="8192", OLLAMA_NUM_PARALLEL=str(PARALLEL), OLLAMA_KEEP_ALIVE="-1")
+server = subprocess.Popen(["ollama", "serve"], env=env, stdout=open(f"{BASE}/ollama.log", "a"), stderr=subprocess.STDOUT)
+for _ in range(60):
+    try:
+        requests.get("http://127.0.0.1:11434", timeout=2); break
+    except Exception:
+        time.sleep(1)
+
+def use_model(model):
+    """Download the model once (about 3-5 min for ~20 GB on Kaggle) and return a client for it."""
+    subprocess.run(["ollama", "pull", model], check=True, stdout=subprocess.DEVNULL)
+    return ChatClient("http://127.0.0.1:11434/v1", model, workers=PARALLEL)
+
+def prep(model, msgs):
+    if "qwen3" in model and not THINK:
+        msgs = [dict(m, content=m["content"] + " /no_think") if m["role"] == "system" else m for m in msgs]
+    return msgs
+
+def tag(model):
+    return model.replace(":", "-").replace("/", "-")
+print("Ollama is running")'''
+
+final = notebook([
+    md("# 05 · FinSight final pipeline: example RAG + best open model + executor + ensemble + risk report\n\n"
+       "**No training anywhere.** Open models only, run for free on Kaggle.\n\n"
+       "1. **Example RAG**: for every question, the 4 most similar *solved training questions* (their rows, gold "
+       "program and unit) are put in the prompt. Retrieval was tuned on dev with `scripts/retrieval_check.py`.\n"
+       "2. **Open LLM** writes evidence rows, answer type, a program (or the copied span) and the unit.\n"
+       "3. **Python executes** the program; numbers and spans are checked against the page (grounding).\n"
+       "4. **Ensemble**: where the main model and TAT-LLM-7B (notebook 02) disagree, the main model is sampled 4 "
+       "more times and a weighted vote decides. The vote share is the confidence.\n"
+       "5. **Automatic risk report**: line items are read by the model, checked against their rows, and ratios are "
+       "computed in Python.\n\n"
+       "**Target:** best published TAT-DQA test result is TAT-LLM-70B, **76.5 EM / 83.9 F1** (official leaderboard).\n\n"
+       "**Kaggle settings (right panel):** Accelerator **GPU T4 x2** · Internet **on** (needs a phone-verified "
+       "account) · Persistence **Files only** (so `runs/` survives a restart). Before starting, upload the notebook-02 "
+       "outputs `tat-llm-7b-fft_dev200.jsonl` and `tat-llm-7b-fft_test.jsonl` from `My Drive/finsight/runs/` with "
+       "*Add data → Upload* (any dataset name); they are copied into `runs/` automatically.\n\n"
+       "Every run writes to `runs/` as it goes and resumes after a disconnect: re-run the setup and server cells, then "
+       "the same cell. Rough times on 2 x T4 for a ~32B model: 30–40 min per 200 dev questions, 4–6 h for the test set."),
+    code(SETUP_FINAL),
+    code(SERVER),
+    md("## Part A · Pick the most accurate open model (200 dev questions)\n"
+       "Every candidate gets the same prompt, the same 4 retrieved examples and the same scorer. Start with 2–3 "
+       "models; add newer open models from [ollama.com/library](https://ollama.com/library) if they fit "
+       "(≤ ~22 GB download for 2 x T4, ≤ ~10 GB for one T4)."),
+    code(r'''from finsight import solve
+from finsight.retrieve import ExampleRetriever
+retriever = ExampleRetriever(docs_train, q_train)   # example RAG over the TRAINING split only
+N = 200
+eval_qs = sample(q_dev, N)                           # same 200 dev questions as notebooks 01 and 02
+RAW, RESULTS = {}, {}
+
+def run(model, qs, docs, split, k=4, mode="direct", n=1, temperature=0.0):
+    """Greedy (n=1) or sampled answers for qs; saved to runs/ and resumable."""
+    client = use_model(model)
+    jobs = {q["uid"]: prep(model, solve.messages(docs[q["doc_uid"]], q, retriever, k, mode)) for q in qs}
+    name = f"final_{tag(model)}_k{k}_{mode}_{split}" + (f"_s{n}" if n > 1 else "")
+    t0 = time.time()
+    out = client.run(jobs, f"{OUT}/{name}.jsonl", n=n, temperature=temperature, max_tokens=400 if mode == "direct" else 700)
+    print(f"{name}: {(time.time() - t0) / max(1, len(qs)):.1f} s/question (0 if loaded from runs/)")
+    return out
+
+CANDIDATES = ["qwen2.5:32b", "qwen3:32b", "gemma3:27b", "mistral-small3.2:24b", "phi4:14b"]
+for m in CANDIDATES:
+    try:
+        RAW[(m, 4, "direct")] = raw = run(m, eval_qs, docs_dev, f"dev{N}")
+        RESULTS[(m, 4, "direct")] = r = score(eval_qs, solve.predictions(eval_qs, docs_dev, raw))
+        print_report(r, f"{m} + example RAG (k=4)")
+    except Exception as e:
+        print(m, "failed:", e)
+BEST = max((key for key in RESULTS if isinstance(key, tuple) and key[1:] == (4, "direct")), key=lambda key: RESULTS[key]["EM"])[0]
+print("\nMost accurate model on dev:", BEST)
+for key, r in sorted(RESULTS.items(), key=lambda kv: -kv[1]["EM"]):
+    print(f"  {r['EM']:6.2f} EM  {r['F1']:6.2f} F1  {key}")'''),
+    md("## Part B · What does each part add? (ablation, same 200 dev questions)\n"
+       "No RAG (k=0) vs. 4 or 8 retrieved examples, and answering directly vs. a short explanation first."),
+    code(r'''for k, mode in ((0, "direct"), (8, "direct"), (4, "reason")):
+    RAW[(BEST, k, mode)] = raw = run(BEST, eval_qs, docs_dev, f"dev{N}", k, mode)
+    RESULTS[(BEST, k, mode)] = score(eval_qs, solve.predictions(eval_qs, docs_dev, raw))
+print(f"{BEST}, 200 dev questions, official scorer:")
+for key in [(BEST, 0, "direct"), (BEST, 4, "direct"), (BEST, 8, "direct"), (BEST, 4, "reason")]:
+    r = RESULTS[key]
+    print(f"  k={key[1]} {key[2]:<6}  EM {r['EM']:6.2f}  F1 {r['F1']:6.2f}  unit {r['scale_acc']:5.1f}  "
+          + "  ".join(f"{t} {r.get(t + '_EM', 0):5.1f}" for t in ("span", "multi-span", "arithmetic", "count")))
+K_BEST, MODE_BEST = max((key[1:] for key in RESULTS if isinstance(key, tuple) and key[0] == BEST),
+                        key=lambda km: RESULTS[(BEST, *km)]["EM"])
+print("best setting:", K_BEST, MODE_BEST)'''),
+    md("## Part C · Ensemble with TAT-LLM-7B + voting where they disagree (200 dev questions)\n"
+       "TAT-LLM's answers come from notebook 02 (no rerun). Only questions where the two systems disagree get 4 extra "
+       "samples, which keeps the cost low. The two weights are chosen on dev; prefer the simplest setting within "
+       "0.5 EM of the best, since 200 questions is a small sample."),
+    code(r'''tat_dev = read_jsonl(f"{OUT}/tat-llm-7b-fft_dev200.jsonl")
+assert tat_dev, "Upload tat-llm-7b-fft_dev200.jsonl from notebook 02 (see the top of this notebook)"
+greedy = RAW[(BEST, K_BEST, MODE_BEST)]
+
+def disagreements(qs, docs, greedy, tat):
+    out = []
+    for q in qs:
+        doc = docs[q["doc_uid"]]
+        a = solve.candidate(greedy[q["uid"]]["raw"], doc) if q["uid"] in greedy else None
+        b = solve.tatllm_candidate(tat[q["uid"]]["raw"], doc) if q["uid"] in tat else None
+        if a is None or b is None or a["key"] != b["key"]:
+            out.append(q)
+    return out
+
+dis = disagreements(eval_qs, docs_dev, greedy, tat_dev)
+print(f"{len(dis)} of {len(eval_qs)} dev questions disagree -> sampled 4 more times")
+VOTE_K = 4
+samples = run(BEST, dis, docs_dev, f"dev{N}", K_BEST, MODE_BEST, n=VOTE_K, temperature=0.7)
+
+grid = {}
+for tw in (0.0, 0.5, 1.0, 1.5, 2.0):
+    for uw in (0.25, 0.5, 1.0):
+        p = solve.predictions(eval_qs, docs_dev, greedy, samples, tat_dev, tw, uw)
+        grid[(tw, uw)] = score(eval_qs, p)["EM"]
+for (tw, uw), em in sorted(grid.items(), key=lambda kv: -kv[1])[:8]:
+    print(f"  TAT-LLM weight {tw:3}  ungrounded weight {uw:4}  EM {em:6.2f}")
+best_em = max(grid.values())
+TAT_W, UNG_W = min((k for k, em in grid.items() if em >= best_em - 0.5), key=lambda k: (k[0], -k[1]))
+final_dev = solve.predictions(eval_qs, docs_dev, greedy, samples, tat_dev, TAT_W, UNG_W)
+RESULTS["final"] = score(eval_qs, final_dev)
+print_report(RESULTS["final"], f"FinSight final on dev: {BEST} k={K_BEST} {MODE_BEST} + TAT-LLM x{TAT_W} + voting")
+
+# confidence: is the vote share a useful "I'm not sure" signal?
+rows = {r["uid"]: r for r in RESULTS["final"]["rows"]}
+for t in (0.5, 0.75, 1.0):
+    kept = [q for q in eval_qs if final_dev[q["uid"]]["agreement"] >= t]
+    em = 100 * sum(rows[q["uid"]]["em"] for q in kept) / max(1, len(kept))
+    print(f"  answer only when agreement >= {t}: {100 * len(kept) / len(eval_qs):5.1f}% answered, EM {em:5.1f}")
+json.dump({"best_model": BEST, "k": K_BEST, "mode": MODE_BEST, "tatllm_weight": TAT_W, "ungrounded_weight": UNG_W,
+           "results": {str(k): report_row(r) for k, r in RESULTS.items()}},
+          open(f"{OUT}/final_dev{N}_results.json", "w"), indent=1)'''),
+    md("## Part D · Risk analysis\n"
+       "1. Accuracy on the risk-related dev questions (debt, liabilities, equity, margins, interest, operating cash flow).\n"
+       "2. The automatic risk report on documents that contain balance-sheet totals."),
+    code(r'''from IPython.display import HTML, display
+from finsight import risk
+sub = risk.risk_questions(eval_qs)
+print_report(score(sub, final_dev), f"risk-related dev questions ({len(sub)})")
+
+client = use_model(BEST)
+with_totals = [d for d in docs_dev.values()
+               if sum(w.lower() == "current" for p in d["pages"] for b in p["blocks"] for w in b["words"]) >= 2][:3]
+for doc in with_totals:
+    rep = risk.report(client, doc)
+    display(HTML(risk.render_html(rep)))'''),
+    md("## Part E · Final run on the official TEST set (run once, at the end)\n"
+       "**Off by default** so *Run all* is safe. Uses the model, setting and weights chosen on dev above; nothing is "
+       "tuned on test. Needs `tat-llm-7b-fft_test.jsonl` from notebook 02. Writes `final_test_official.json` "
+       "(`{uid: [answer, scale]}`, the leaderboard format) and `final_test_results.json`."),
+    code(r'''RUN_TEST = False
+if not RUN_TEST:
+    raise SystemExit("Part E skipped (RUN_TEST = False).")
+tat_test = read_jsonl(f"{OUT}/tat-llm-7b-fft_test.jsonl")
+assert len(tat_test) == len(q_test), "Upload tat-llm-7b-fft_test.jsonl (all 1,663 questions) from notebook 02"
+greedy_t = run(BEST, q_test, docs_test, "test", K_BEST, MODE_BEST)
+dis_t = disagreements(q_test, docs_test, greedy_t, tat_test)
+print(len(dis_t), "test questions disagree")
+samples_t = run(BEST, dis_t, docs_test, "test", K_BEST, MODE_BEST, n=VOTE_K, temperature=0.7)
+
+TEST = {
+    f"{BEST} + example RAG + executor": solve.predictions(q_test, docs_test, greedy_t),
+    "TAT-LLM-7B + executor (notebook 02)": solve.predictions(q_test, docs_test, {}, None, tat_test, 1.0),
+    f"FinSight final (+ TAT-LLM x{TAT_W} + voting)": solve.predictions(q_test, docs_test, greedy_t, samples_t, tat_test, TAT_W, UNG_W),
+}
+SCORES = {label: score(q_test, p) for label, p in TEST.items()}
+for label, r in SCORES.items():
+    print_report(r, "TEST: " + label)
+final_t = TEST[f"FinSight final (+ TAT-LLM x{TAT_W} + voting)"]
+sub_t = risk.risk_questions(q_test)
+print_report(score(sub_t, final_t), f"TEST risk-related questions ({len(sub_t)})")
+print("\nPublished TAT-DQA test results (official leaderboard, EM / F1): MHST 41.5 / 50.7 · Doc2SoarGraph 59.2 / 67.6 · "
+      "TAT-LLM-7B 71.3 / 80.2 · TAT-LLM-13B 72.2 / 80.5 · TAT-LLM-70B 76.5 / 83.9 · Human 84.1 / 90.8")
+json.dump({u: [p["answer"], p["scale"]] for u, p in final_t.items()}, open(f"{OUT}/final_test_official.json", "w"))
+json.dump({"setting": {"model": BEST, "k": K_BEST, "mode": MODE_BEST, "tatllm_weight": TAT_W, "ungrounded_weight": UNG_W},
+           "results": {k: report_row(r) for k, r in SCORES.items()},
+           "risk_subset": report_row(score(sub_t, final_t))}, open(f"{OUT}/final_test_results.json", "w"), indent=1)'''),
+    md("## Part F · Demo app: ask a question, or get the automatic risk report\n"
+       "Upload a digital financial PDF (up to 3 pages). The live app uses the main model with example RAG (TAT-LLM "
+       "is not loaded here, so there is no ensemble)."),
+    code(r'''import gradio as gr
+from finsight.demo import doc_from_pdf, highlight_pages, explain_final_html
+client = use_model(BEST)
+
+def ask(pdf, question):
+    if pdf is None or not question.strip():
+        return "<p>Upload a PDF and type a question.</p>", []
+    path = pdf if isinstance(pdf, str) else pdf.name
+    doc, scales = doc_from_pdf(path)
+    res = solve.answer(client, doc, question, retriever, K_BEST, n_samples=2, mode=MODE_BEST)
+    return explain_final_html(res, doc), highlight_pages(path, doc, scales, res["evidence"])
+
+def risk_report(pdf):
+    if pdf is None:
+        return "<p>Upload a PDF.</p>", []
+    path = pdf if isinstance(pdf, str) else pdf.name
+    doc, scales = doc_from_pdf(path)
+    rep = risk.report(client, doc)
+    rows = sorted({r for c in rep["checks"] for r in c["evidence"]} | {u["row"] for u in rep["unusual_changes"]})
+    return risk.render_html(rep), highlight_pages(path, doc, scales, rows)
+
+with gr.Blocks(title="FinSight") as app:
+    gr.Markdown("## FinSight: answers from financial statements, with the calculation and the source rows")
+    pdf = gr.File(label="Financial PDF (digital, up to 3 pages)", file_types=[".pdf"])
+    with gr.Tab("Ask a question"):
+        q = gr.Textbox(label="Question", placeholder="What was the percentage change in revenue from 2018 to 2019?")
+        b1 = gr.Button("Answer")
+        h1, g1 = gr.HTML(), gr.Gallery(label="Evidence on the page", columns=1, height=800)
+        b1.click(ask, [pdf, q], [h1, g1])
+    with gr.Tab("Automatic risk report"):
+        b2 = gr.Button("Analyse risk")
+        h2, g2 = gr.HTML(), gr.Gallery(label="Rows used", columns=1, height=800)
+        b2.click(risk_report, [pdf], [h2, g2])
+app.launch(share=True)'''),
+    code(r'''# Kaggle: download all results in one file (Output panel -> runs.zip), then upload them to Drive / send them
+shutil.make_archive(f"{BASE}/runs", "zip", OUT)
+print("saved", f"{BASE}/runs.zip")'''),
+])
+
 nb_dir = os.path.join(ROOT, "notebooks")
 os.makedirs(nb_dir, exist_ok=True)
 for old in glob.glob(os.path.join(nb_dir, "*.ipynb")):
     os.remove(old)
 for name, nb in (("01_baseline_general_llm.ipynb", baseline), ("02_finsight_pipeline.ipynb", pipeline),
-                 ("03_demo_app.ipynb", demo), ("04_paper1_vlm_rerun.ipynb", paper1)):
+                 ("03_demo_app.ipynb", demo), ("04_paper1_vlm_rerun.ipynb", paper1),
+                 ("05_final_pipeline.ipynb", final)):
     with open(os.path.join(nb_dir, name), "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=1)
     print("wrote notebooks/" + name)
