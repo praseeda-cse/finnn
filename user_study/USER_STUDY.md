@@ -4,6 +4,10 @@ Technical Enrichment Activity #7 (User Study / Field Study). Required: study pla
 feedback from ≥30 participants, analysis, improvements incorporated.
 **Get the guide's approval for this plan before sending the form.**
 
+Type of study: a **requirements and perception survey**. Participants do not use the system. They
+answer questions about how they handle financial reports today, judge a written example of FinSight's
+output, and say what they need. Everything fits in a Google Form; no demo or screenshots are needed.
+
 ---
 
 ## 1. Final use case
@@ -12,18 +16,16 @@ feedback from ≥30 participants, analysis, improvements incorporated.
 > its unit and the exact rows it came from highlighted on the page, so you can check it in seconds
 > instead of searching and calculating by hand.**
 
-Scope today: digital PDFs of 1–3 pages (a balance sheet, P&L, cash-flow or segment table).
-Full annual reports, scanned pages and Indian formats are *asked about* as future features, not promised.
 The difference from ChatGPT: FinSight shows **where** each number came from and **computes** the arithmetic exactly.
 
 ## 2. Who the users are
 
-| Group | Who | What they need from FinSight |
+| Group | Who | What they need |
 |---|---|---|
 | **Learners** | Commerce / BBA / MBA / finance students, CA / CMA / CS students | the formula and working, to learn and to check their own answers |
 | **Investors** | anyone who invests in stocks or mutual funds (Q2) | plain answers with units they understand (lakh/crore) |
-| **Professionals** | audit, accounts, analysis, banking | traceability, accuracy, privacy (runs offline), export |
-| **Technical** | engineering / IT students | usability feedback only (not target users) |
+| **Professionals** | audit, accounts, analysis, banking | traceability, accuracy, privacy |
+| **Technical** | engineering / IT students | general opinion (not target users) |
 
 **Recruitment (40 invited → ≥30 valid).** Try to keep engineering/IT friends to at most half of the responses.
 For the rest, ask friends in commerce or CA, and family members who invest or work in banks or accounts.
@@ -33,26 +35,17 @@ For the rest, ask friends in commerce or CA, and family members who invest or wo
 ## 3. Study plan
 
 **Research questions**
-- RQ1 Usability: is the demo easy to use? (UMUX-Lite, converted to a SUS-equivalent 0–100 score)
-- RQ2 Verification: do the equation and highlighted evidence help users check an answer and *catch a wrong one*?
-- RQ3 Trust: do users trust an explained answer more than a bare one?
-- RQ4 Fit: which features matter for each group, and would they use it?
+- RQ1 Problem: how do people get numbers from financial reports today, and what is hard about it?
+- RQ2 Verification: do people notice a wrong AI answer when no source is shown?
+- RQ3 Trust: do people trust an answer more when it shows the calculation and the source rows?
+- RQ4 Needs: which features matter to each group, and would they use such a tool?
 
-**Procedure (~7 min).** Profile → two tasks in the demo → bare vs. explained answer → opinion grid →
-features → one open question. If possible, run it with each friend in person or on a call: you start
-the demo and they type the questions.
-
-**Materials**
-- Demo link (notebook 03, Gradio) that stays up during collection, or run it live.
-- Task page: the APAC total-assets segment table (Paper 3, Fig. 2). **Task B** must be a question
-  where FinSight is **wrong**: pick one from the test run where the prediction ≠ gold.
-- Two screenshots: **A** = only "Answer: 21,234"; **B** = answer + unit (thousand) + equation
-  `958,744 − 937,510` + highlighted APAC row + confidence.
+**Procedure (~5 min).** Online Google Form, shared on WhatsApp or by e-mail. Anonymous.
 
 **Ethics.** Anonymous, no names or emails, voluntary, used only for the project report and papers.
 
 **Timeline.** Pilot with 3 friends → fix anything confusing → collect for about a week → analyse →
-build the top improvements → re-test with 5–10 people → write up.
+build the top requested improvements into FinSight → write up.
 
 ---
 
@@ -60,18 +53,18 @@ build the top improvements → re-test with 5–10 people → write up.
 
 **Form-building rules** (so `scripts/analyse_user_study.py` can read the export):
 - Keep the question wording exactly as written.
-- In the grid (Q12–16), label the columns **1 2 3 4 5**, not words.
+- In the grid (Q13–17), label the columns **1 2 3 4 5**, not words.
 - Settings → "Collect email addresses" OFF.
 - Every question is Required except Q19.
 
-**Title:** FinSight: Checking Answers from Financial Statements – User Study
+**Title:** FinSight: Getting Answers from Financial Reports – Survey
 
 **Description:**
-> We are final-year CSE students at Amrita School of Computing, Coimbatore. FinSight answers
-> questions about a company's financial statements and shows the calculation and the exact rows on
-> the page it used, so you can check the answer yourself. Takes about 7 minutes. Responses are
-> anonymous and used only for academic research. By submitting, you confirm you are 18 or older
-> and agree to this.
+> We are final-year CSE students at Amrita School of Computing, Coimbatore, building FinSight: a tool
+> that answers questions about a company's financial statements (e.g., "How much did total assets
+> grow?") and shows the calculation and the exact rows it used, so you can check the answer yourself.
+> This 5-minute survey helps us design it. Responses are anonymous and used only for academic research.
+> By submitting, you confirm you are 18 or older and agree to this.
 
 ### Section 1: About you
 1. **Which ONE describes you best?** *(Multiple choice)*
@@ -83,76 +76,94 @@ build the top improvements → re-test with 5–10 people → write up.
    - Other
 2. **Do you invest in stocks or mutual funds?** *(Yes · No)*
 3. **How confident are you reading a balance sheet or income statement?** *(Linear scale 1–5: Not at all → Very confident)*
-4. **Have you used an AI tool (ChatGPT, Gemini etc.) for questions about financial documents or numbers?** *(Multiple choice)*
+
+### Section 2: How you do it today
+4. **When you need a number from a company's financial report (e.g., profit growth), how do you usually get it?** *(Checkboxes)*
+   - I read the report and calculate it myself
+   - Websites or apps (Screener / Moneycontrol / broker app)
+   - I ask ChatGPT or another AI
+   - I ask a friend / teacher / advisor
+   - I have never needed to
+5. **What is hardest about getting answers from financial reports?** *(Checkboxes; Response validation: select at most 2)*
+   - Finding the right number in a long report
+   - Knowing which formula to use
+   - Getting the unit right (thousand / lakh / crore / %)
+   - It takes too much time
+   - Not knowing if my answer is correct
+6. **Have you used an AI tool (ChatGPT, Gemini etc.) for questions about financial documents or numbers?** *(Multiple choice)*
    - Yes – the answers were mostly right
    - Yes – the answers were sometimes wrong
    - Yes – but I didn't check them
    - No
 
-### Section 2: Try FinSight
-Description: *Open the demo: [LINK]. The report page is already loaded. Ask each question exactly as
-written, look at the answer and the highlighted page, then answer below.*
+### Section 3: An example
+**Section description (paste exactly):**
+> Below is part of a real company's annual report.
+>
+> Total assets by region (in thousands):
+> • AMER: 2019 = 751,990 | 2018 = 645,791
+> • APAC: 2019 = 958,744 | 2018 = 937,510
+> • EMEA: 2019 = 209,541 | 2018 = 193,797
 
-**Task A – ask: "What was the change in the total assets from APAC between 2018 and 2019?"**
+7. **An AI tool was asked "What were EMEA's total assets in 2019?" and answered "193,797 thousand". Is this answer correct?** *(Correct · Wrong · Not sure)*
+   *(Answer key: **Wrong**. 193,797 is the 2018 value; the 2019 value is 209,541. This is a "wrong column" error, the kind Paper 1 found to be common.)*
 
-5. **Task A: Is FinSight's answer correct? Check it against the page.** *(Correct · Wrong · Not sure)*
+**Text block before Q8 (Google Forms: "Add title and description"):**
+> Two tools answer the question "What was the change in APAC total assets between 2018 and 2019?"
+>
+> **Tool A:** 21,234
+>
+> **Tool B:** 21,234 thousand
+> Calculation: 958,744 − 937,510 = 21,234
+> Source: APAC row, 2019 and 2018 columns (highlighted on the report page)
 
-**Task B – ask: "[QUESTION WHERE FINSIGHT IS WRONG]"**
-
-6. **Task B: Is FinSight's answer correct? Check it against the page.** *(Correct · Wrong · Not sure)*
-7. **For Task B, what did you use to decide?** *(Checkboxes)*
-   - The highlighted rows on the page
-   - The equation
-   - The unit
-   - My own reading of the page
-   - I guessed
-8. **Without FinSight, how long would these two questions take you by hand?** *(Multiple choice)*
-   - Less than 2 min
-   - 2–5 min
-   - 5–10 min
-   - More than 10 min
-   - I couldn't do it
-
-### Section 3: Answer only vs. explained answer
-Description: *Both screenshots answer the same question.* [Screenshot A] [Screenshot B]
-
-9. **Which answer do you trust more?** *(A – answer only · B – answer with equation and evidence · No difference)*
-10. **How much do you trust Answer A?** *(Linear scale 1–5: Not at all → Completely)*
-11. **How much do you trust Answer B?** *(Linear scale 1–5: Not at all → Completely)*
+8. **Which answer would you trust more?** *(Tool A · Tool B · No difference)*
+9. **How much would you trust Tool A's answer?** *(Linear scale 1–5: Not at all → Completely)*
+10. **How much would you trust Tool B's answer?** *(Linear scale 1–5: Not at all → Completely)*
+11. **With Tool B, would you check the answer yourself before using it?** *(Always · Sometimes · Never – I'd trust it)*
+12. **Which part of Tool B is most useful to you?** *(Multiple choice)*
+   - The calculation
+   - The source rows on the page
+   - The unit (thousand)
+   - All are equally useful
+   - None
 
 ### Section 4: Your opinion
-**Q12–16 are one multiple-choice grid** titled "Your opinion". Columns: 1 2 3 4 5 (1 = Strongly disagree, 5 = Strongly agree). Rows:
+**Q13–17 are one multiple-choice grid** titled "Your opinion". Columns: 1 2 3 4 5 (1 = Strongly disagree, 5 = Strongly agree). Rows:
 
-12. FinSight's capabilities meet my requirements.
-13. FinSight is easy to use.
-14. The highlighted evidence made it easy to check where the answer came from.
-15. The equation helped me understand how the number was calculated.
-16. I would rather the system say "I'm not sure" than give a possibly wrong answer.
+13. Seeing the exact rows an answer came from would help me catch mistakes.
+14. Seeing the calculation would help me understand how the number was found.
+15. Showing the unit clearly (thousand / lakh / crore / %) is important to me.
+16. I would rather the tool say "I'm not sure" than give a possibly wrong answer.
+17. I would prefer a tool that runs on my own computer so my documents stay private.
 
-### Section 5: Features and feedback
-17. **Which features would be most useful to you?** *(Checkboxes, Response validation: select at most 3)*
+### Section 5: What you need
+18. **Which features would be most useful to you?** *(Checkboxes; Response validation: select at most 3)*
    - Indian number format (lakh/crore and 1,00,000 grouping)
    - Full annual reports (100+ pages)
    - Scanned or photographed reports
    - Comparing two companies or two years
-   - Export answers and evidence to Excel or PDF
-   - Runs offline on my own computer (documents stay private)
+   - Export answers and sources to Excel or PDF
    - Questions in Hindi or Tamil or other Indian languages
-18. **If FinSight were a real product, how would you use it?** *(Regularly · Occasionally · Only to try it · Not at all)*
-19. **What one change would make FinSight more useful for you?** *(Paragraph, optional)*
+   - Explaining financial terms in simple words
+19. **If a tool like FinSight were available, how would you use it?** *(Multiple choice)*
+   - Regularly
+   - Occasionally
+   - Only to try it
+   - Not at all
+
+20. *(optional, not counted)* **Anything you would want such a tool to do?** *(Paragraph)*
 
 **Why each question is there**
 
 | Questions | What they give you |
 |---|---|
-| 1–4 | groups for comparison (learner / investor / professional / technical) and background |
-| 5–7 | **the key result:** can people catch a wrong answer, and does the evidence help them do it? |
-| 8 | time saved, which supports the use case |
-| 9–11 | do explanations increase trust? (paired test) |
-| 12–13 | UMUX-Lite, a standard 2-item usability scale (Lewis et al., 2013) |
-| 14–16 | whether each explanation feature helps; support for abstaining with "I'm not sure" |
-| 17–18 | what to build next, and whether people would actually use it |
-| 19 | themes for the improvements table |
+| 1–3 | groups for comparison, plus financial background |
+| 4–6 | the problem today (motivation for the project) |
+| 7 | **key result:** how many people accept a wrong AI answer when no source is shown |
+| 8–12 | whether showing the calculation and source increases trust (a paired test), and which part matters |
+| 13–17 | support for each design choice: evidence, calculation, units, abstaining, running offline |
+| 18–19 | what to build next, and whether people would use it |
 
 ---
 
@@ -164,24 +175,24 @@ Results are reported overall and per group.
 | What | How |
 |---|---|
 | Who took part | counts per group (Q1) and investors (Q2) |
-| Catching a wrong answer | % who said **Wrong** on Task B; compare participants who used evidence or the equation (Q7) with those who didn't |
-| Task A | % who judged it correctly |
-| Usability | UMUX-Lite = ((Q12 − 1) + (Q13 − 1)) / 8 × 100; SUS-equivalent = 0.65 × UMUX-Lite + 22.9 (Lewis et al., 2013); 68 = average |
-| A vs. B trust | Q10 vs. Q11: Wilcoxon signed-rank; % choosing B |
-| Explanation features | % agree (4–5) for Q14–16, per group |
-| Features, adoption | counts for Q17 and Q18, per group |
-| Open answers | group Q19 into themes and count them (done by hand) |
+| Problem today | counts for Q4–Q6 |
+| Spotting a wrong answer | % who said **Wrong** on Q7, by group and by confidence (Q3) |
+| A vs. B trust | Q9 vs. Q10: Wilcoxon signed-rank test; % choosing B (Q8) |
+| Would still verify | Q11 counts |
+| Design choices | % agree (4–5) for Q13–17, by group |
+| Features, adoption | counts for Q18 and Q19, by group |
+| Open answers (Q20) | group into themes and count them (done by hand) |
 
 ## 6. Improvements loop (needed for marks)
 
-Make a table: *feedback theme → how many people raised it → change made → where in the code or demo*.
-Changes the team can realistically build:
-- Indian format toggle (₹, lakh/crore, 1,00,000 grouping) and the scale written out ("21,234 thousand = 2.12 crore").
+Make a table: *what users asked for → how many → change made in FinSight → where in the code*.
+Likely changes:
+- Indian number format (₹, lakh/crore, 1,00,000 grouping) and the scale written out ("21,234 thousand = 2.12 crore").
 - Formula in words next to the equation ("change = 2019 − 2018").
 - An "I'm not sure" message when the votes disagree or an operand isn't on the page (Paper 2 already has both signals).
 - Export the evidence and equation to CSV.
 
-Re-test the changes with 5–10 people and add a before/after row.
+Show each change with a before/after screenshot of the demo output.
 
 ## 7. Evidence to submit
 - Guide approval
