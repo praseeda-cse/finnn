@@ -74,6 +74,26 @@ def highlight_pages(path, doc, scales, evidence, zoom=1.5):
     return images
 
 
+def explain_final_html(result, doc):
+    """Answer card for the final pipeline (solve.answer): answer, unit, executed program, evidence rows,
+    grounding check and vote agreement."""
+    from .prompt import parse_output
+    from .solve import final_block
+    p = parse_output(final_block(result.get("raw", "")))
+    by_id = {b["id"]: b for pg in doc["pages"] for b in pg["blocks"]}
+    ev_lines = "".join(f"<li><code>[{i}] {html.escape(block_text(by_id[i]))}</code></li>" for i in result["evidence"] if i in by_id)
+    how = (f"<b>Program (computed by Python):</b> <code>{html.escape(p['program'])}</code>" if p["program"]
+           else f"<b>Counted items:</b> {html.escape(', '.join(p['items']))}" if p["items"] else "<b>Copied from the document.</b>")
+    ans = ", ".join(result["answer"]) or "(no valid answer)"
+    check = ("✅ every number and span was found in the document" if result["grounded"]
+             else "⚠️ some numbers were not found in the document: check this answer")
+    sure = "" if result.get("agreement", 1) >= 0.5 else "<p>⚠️ <b>Not sure:</b> the model's attempts disagreed.</p>"
+    return (f"<h3>Answer: {html.escape(ans)} {html.escape(result['scale'])}</h3>"
+            f"<p><b>Question type:</b> {html.escape(result.get('type') or 'unknown')}<br/>{how}</p>"
+            f"<p><b>Evidence rows (highlighted on the page):</b></p><ul>{ev_lines or '<li>none found</li>'}</ul>"
+            f"<p>{check}</p>{sure}")
+
+
 def explain_html(result, doc):
     p = result["parsed"]
     by_id = {b["id"]: b for pg in doc["pages"] for b in pg["blocks"]}
