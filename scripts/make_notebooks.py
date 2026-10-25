@@ -297,6 +297,7 @@ from finsight.llm import ChatClient
 PARALLEL = 2          # requests at once: 2 for ~32B models on 2 x T4, 4 for <=14B models
 THINK = False         # Qwen3 models: False adds /no_think (much faster); True lets them reason first
 if shutil.which("ollama") is None:
+    subprocess.run("apt-get -qq update && apt-get -qq install -y zstd pciutils > /dev/null", shell=True)  # installer needs zstd
     subprocess.run("curl -fsSL https://ollama.com/install.sh | sh", shell=True, check=True)
 env = dict(os.environ, OLLAMA_CONTEXT_LENGTH="8192", OLLAMA_NUM_PARALLEL=str(PARALLEL), OLLAMA_KEEP_ALIVE="-1")
 server = subprocess.Popen(["ollama", "serve"], env=env, stdout=open(f"{BASE}/ollama.log", "a"), stderr=subprocess.STDOUT)
@@ -307,7 +308,12 @@ for _ in range(60):
         time.sleep(1)
 
 def use_model(model):
-    """Download the model once (about 3-5 min for ~20 GB on Kaggle) and return a client for it."""
+    """Download the model once (about 3-5 min for ~20 GB on Kaggle), unload any other model so the GPUs
+    are free, and return a client for it."""
+    loaded = subprocess.run(["ollama", "ps"], capture_output=True, text=True).stdout.splitlines()[1:]
+    for name in (line.split()[0] for line in loaded if line.strip()):
+        if name != model and name != model + ":latest":
+            subprocess.run(["ollama", "stop", name])
     subprocess.run(["ollama", "pull", model], check=True, stdout=subprocess.DEVNULL)
     return ChatClient("http://127.0.0.1:11434/v1", model, workers=PARALLEL)
 
@@ -361,7 +367,7 @@ def run(model, qs, docs, split, k=4, mode="direct", n=1, temperature=0.0):
     print(f"{name}: {(time.time() - t0) / max(1, len(qs)):.1f} s/question (0 if loaded from runs/)")
     return out
 
-CANDIDATES = ["qwen2.5:32b", "qwen3:32b", "gemma3:27b", "mistral-small3.2:24b", "phi4:14b"]
+CANDIDATES = ["qwen2.5:32b", "qwen3:32b", "gemma3:27b"]   # more if time allows: "mistral-small3.2:24b", "phi4:14b"
 for m in CANDIDATES:
     try:
         RAW[(m, 4, "direct")] = raw = run(m, eval_qs, docs_dev, f"dev{N}")
@@ -369,6 +375,8 @@ for m in CANDIDATES:
         print_report(r, f"{m} + example RAG (k=4)")
     except Exception as e:
         print(m, "failed:", e)
+if not RESULTS:
+    raise RuntimeError(f"Every model failed. Check that the server cell ran, and read {BASE}/ollama.log")
 BEST = max((key for key in RESULTS if isinstance(key, tuple) and key[1:] == (4, "direct")), key=lambda key: RESULTS[key]["EM"])[0]
 print("\nMost accurate model on dev:", BEST)
 for key, r in sorted(RESULTS.items(), key=lambda kv: -kv[1]["EM"]):
@@ -391,26 +399,34 @@ print("best setting:", K_BEST, MODE_BEST)'''),
        "samples, which keeps the cost low. The two weights are chosen on dev; prefer the simplest setting within "
        "0.5 EM of the best, since 200 questions is a small sample."),
     code(r'''tat_dev = read_jsonl(f"{OUT}/tat-llm-7b-fft_dev200.jsonl")
-assert tat_dev, "Upload tat-llm-7b-fft_dev200.jsonl from notebook 02 (see the top of this notebook)"
+if not tat_dev:
+    print("TAT-LLM outputs not found: ensemble skipped. Voting is used where the model's answer is missing or "
+          "not found on the page. Upload tat-llm-7b-fft_dev200.jsonl (notebook 02) to add the ensemble.")
 greedy = RAW[(BEST, K_BEST, MODE_BEST)]
 
 def disagreements(qs, docs, greedy, tat):
+    """Questions that get extra samples: the two systems disagree (or, without TAT-LLM, the model's
+    answer is missing or ungrounded)."""
     out = []
     for q in qs:
         doc = docs[q["doc_uid"]]
         a = solve.candidate(greedy[q["uid"]]["raw"], doc) if q["uid"] in greedy else None
+        if not tat:
+            if a is None or not a["grounded"]:
+                out.append(q)
+            continue
         b = solve.tatllm_candidate(tat[q["uid"]]["raw"], doc) if q["uid"] in tat else None
         if a is None or b is None or a["key"] != b["key"]:
             out.append(q)
     return out
 
 dis = disagreements(eval_qs, docs_dev, greedy, tat_dev)
-print(f"{len(dis)} of {len(eval_qs)} dev questions disagree -> sampled 4 more times")
+print(f"{len(dis)} of {len(eval_qs)} dev questions get 4 extra samples")
 VOTE_K = 4
 samples = run(BEST, dis, docs_dev, f"dev{N}", K_BEST, MODE_BEST, n=VOTE_K, temperature=0.7)
 
 grid = {}
-for tw in (0.0, 0.5, 1.0, 1.5, 2.0):
+for tw in ((0.0, 0.5, 1.0, 1.5, 2.0) if tat_dev else (0.0,)):
     for uw in (0.25, 0.5, 1.0):
         p = solve.predictions(eval_qs, docs_dev, greedy, samples, tat_dev, tw, uw)
         grid[(tw, uw)] = score(eval_qs, p)["EM"]
@@ -452,22 +468,23 @@ for doc in with_totals:
     code(r'''RUN_TEST = False
 if not RUN_TEST:
     raise SystemExit("Part E skipped (RUN_TEST = False).")
-tat_test = read_jsonl(f"{OUT}/tat-llm-7b-fft_test.jsonl")
-assert len(tat_test) == len(q_test), "Upload tat-llm-7b-fft_test.jsonl (all 1,663 questions) from notebook 02"
+from finsight import risk
+tat_test =read_jsonl(f"{OUT}/tat-llm-7b-fft_test.jsonl") if TAT_W else {}
+assert not TAT_W or len(tat_test) == len(q_test), "Upload tat-llm-7b-fft_test.jsonl (all 1,663 questions) from notebook 02"
 greedy_t = run(BEST, q_test, docs_test, "test", K_BEST, MODE_BEST)
 dis_t = disagreements(q_test, docs_test, greedy_t, tat_test)
-print(len(dis_t), "test questions disagree")
+print(len(dis_t), "test questions get extra samples")
 samples_t = run(BEST, dis_t, docs_test, "test", K_BEST, MODE_BEST, n=VOTE_K, temperature=0.7)
 
-TEST = {
-    f"{BEST} + example RAG + executor": solve.predictions(q_test, docs_test, greedy_t),
-    "TAT-LLM-7B + executor (notebook 02)": solve.predictions(q_test, docs_test, {}, None, tat_test, 1.0),
-    f"FinSight final (+ TAT-LLM x{TAT_W} + voting)": solve.predictions(q_test, docs_test, greedy_t, samples_t, tat_test, TAT_W, UNG_W),
-}
+FINAL = f"FinSight final ({'+ TAT-LLM x' + str(TAT_W) + ' ' if TAT_W else ''}+ voting)"
+TEST = {f"{BEST} + example RAG + executor": solve.predictions(q_test, docs_test, greedy_t)}
+if tat_test:
+    TEST["TAT-LLM-7B + executor (notebook 02)"] = solve.predictions(q_test, docs_test, {}, None, tat_test, 1.0)
+TEST[FINAL] = solve.predictions(q_test, docs_test, greedy_t, samples_t, tat_test, TAT_W, UNG_W)
 SCORES = {label: score(q_test, p) for label, p in TEST.items()}
 for label, r in SCORES.items():
     print_report(r, "TEST: " + label)
-final_t = TEST[f"FinSight final (+ TAT-LLM x{TAT_W} + voting)"]
+final_t = TEST[FINAL]
 sub_t = risk.risk_questions(q_test)
 print_report(score(sub_t, final_t), f"TEST risk-related questions ({len(sub_t)})")
 print("\nPublished TAT-DQA test results (official leaderboard, EM / F1): MHST 41.5 / 50.7 · Doc2SoarGraph 59.2 / 67.6 · "
