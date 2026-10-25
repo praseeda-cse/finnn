@@ -52,7 +52,7 @@ cd finnn
 python -m venv .venv
 .venv\Scripts\activate          # Windows  (Linux/macOS: source .venv/bin/activate)
 pip install -r requirements.txt
-python scripts/sanity_check.py  # CPU only, ~1 min: should print ~99.7% EM on test
+python scripts/sanity_check.py  # CPU only, ~10 s: should print ~99.7% EM on test
 ```
 The packed dataset is already in `data/`, so no separate download is needed. Model weights
 (`next-tat/tat-llm-7b-fft`, `Qwen/Qwen2-VL-2B-Instruct`) download from Hugging Face on first use.

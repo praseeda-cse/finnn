@@ -4,7 +4,8 @@ Versions are git tags (`git tag`); each line links to the commits that made it.
 
 ## v0.4 (2026-10-25)
 - Installation guide, `requirements.txt`, MIT licence, this changelog.
-- User study: questionnaire and plan (`user_study/`), analysis script (`scripts/analyse_user_study.py`).
+- User study: use case and user groups, 19-question survey, Apps Script that builds the Google Form
+  (`user_study/`), analysis script (`scripts/analyse_user_study.py`).
 
 ## v0.3 (2026-10-15)
 - Final pipeline: TAT-LLM-7B + executor + self-consistency voting + evidence grounding.

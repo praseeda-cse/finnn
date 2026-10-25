@@ -4,8 +4,11 @@
  *
  * How to run:
  *   1. Open https://script.google.com → New project.
- *   2. Delete the sample code, paste this whole file, and click Save.
- *   3. Choose createFinSightSurvey in the function menu and click Run.
+ *   2. Delete the sample code, paste this whole file, rename the project (e.g. "FinSight survey")
+ *      and press Ctrl+S. Wait a minute and reload the page: running a brand-new project straight
+ *      away can fail with "Error 401: invalid_client".
+ *   3. Choose createFinSightSurvey in the function menu and click Run. If sign-in still fails,
+ *      try an Incognito window signed into only one Google account.
  *   4. Allow access when Google asks: Advanced → Go to project → Allow. It's your own script.
  *   5. View → Execution log shows the link to share and the edit link.
  *
