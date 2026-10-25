@@ -29,12 +29,33 @@ Its prompt is rebuilt exactly as in the authors' released files (identical on al
 | `finsight/analysis.py` | error breakdown: which single fix (unit, sign, x100, rounding) would make each wrong answer correct |
 | `finsight/demo.py` | read any digital PDF, answer, highlight evidence rows on the page |
 | `finsight/prompt.py`, `infer.py` | general-LLM baseline (notebook 01) |
+| `finsight/vlm.py` | Qwen2-VL-2B on page images (paper 1 re-run, notebook 04) |
 | `scripts/build_compact.py` | pack the TAT-DQA download → `data/*.json.gz` (19 MB) |
 | `scripts/sanity_check.py` | gold answers through our format + executor + scorer = 99.7% EM on test |
 | `scripts/make_notebooks.py` | generates the notebooks |
+| `scripts/analyse_user_study.py` | SUS score, trust tests and charts from the user-study form export |
 | `notebooks/01_baseline_general_llm.ipynb` | Qwen2.5-7B, no training (comparison row) |
 | `notebooks/02_finsight_pipeline.ipynb` | **main results**: TAT-LLM vs. + executor vs. + voting; final test run |
 | `notebooks/03_demo_app.ipynb` | Gradio demo |
+| `notebooks/04_paper1_vlm_rerun.ipynb` | Qwen2-VL-2B controlled re-run (budget, prompt, structured output) |
+| `user_study/` | user-study plan and questionnaire |
+
+## Installation
+
+**Option A: Google Colab (recommended, needs no setup).** Use the links below. Notebooks install
+their own packages. TAT-LLM-7B needs a GPU, and a free T4 is enough.
+
+**Option B: local machine.** Needs Python 3.10+ and git. A CUDA GPU with ≥16 GB is needed only to run the models.
+```bash
+git clone https://github.com/praseeda-cse/finnn.git
+cd finnn
+python -m venv .venv
+.venv\Scripts\activate          # Windows  (Linux/macOS: source .venv/bin/activate)
+pip install -r requirements.txt
+python scripts/sanity_check.py  # CPU only, ~1 min: should print ~99.7% EM on test
+```
+The packed dataset is already in `data/`, so no separate download is needed. Model weights
+(`next-tat/tat-llm-7b-fft`, `Qwen/Qwen2-VL-2B-Instruct`) download from Hugging Face on first use.
 
 ## Run on Colab
 - Baseline: https://colab.research.google.com/github/praseeda-cse/finnn/blob/main/notebooks/01_baseline_general_llm.ipynb
@@ -49,5 +70,13 @@ Google Drive; results go to **My Drive/finsight/runs/** and every step resumes a
 - Report the official scorer's EM/F1 and the per-type table. TAT-LLM's published 72.6 EM comes from the
   authors' own lenient script (≈1% tolerance, ignores the unit); compare models under the same official scorer.
 
-## Data
-TAT-DQA © Zhu et al., CC BY 4.0 (https://github.com/NExTplusplus/TAT-DQA). TAT-LLM © its authors (Llama 2 licence).
+## Data and licence
+Code: MIT (see `LICENSE`). TAT-DQA © Zhu et al., CC BY 4.0 (https://github.com/NExTplusplus/TAT-DQA).
+TAT-LLM © its authors (Llama 2 licence). Version history is in `CHANGELOG.md`.
+
+## Team
+Final-year project, Dept. of CSE, Amrita School of Computing, Coimbatore.
+Vijaya Sree Praseeda · Neha T · Mahasri M · K. Shivani Shreya Reddy · Nivasini J. Guide: Dr. Bagyammal T.
+
+Papers (drafts): *Reading Is Not Reasoning* (diagnostic study of a zero-shot VLM on TAT-DQA) ·
+*FinSight* (this pipeline) · *Question Answering over Financial Documents: A Survey*.

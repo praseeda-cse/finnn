@@ -1,0 +1,16 @@
+# Core (data, executor, scorer, analysis): enough for scripts/sanity_check.py on CPU
+numpy
+pandas
+scipy
+pymupdf          # imported as fitz: render PDF pages, read the text layer
+pillow
+
+# Models (GPU; the notebooks install these on Colab)
+torch
+transformers>=4.45
+accelerate
+bitsandbytes     # 4-bit NF4 loading of TAT-LLM-7B on a 16 GB T4
+peft
+
+# Demo app (notebook 03)
+gradio
