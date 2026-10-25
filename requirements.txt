@@ -4,6 +4,8 @@ pandas
 scipy
 pymupdf          # imported as fitz: render PDF pages, read the text layer
 pillow
+scikit-learn     # example retrieval (TF-IDF)
+requests         # talks to the model server (Ollama / vLLM / llama.cpp)
 
 # Models (GPU; the notebooks install these on Colab)
 torch
