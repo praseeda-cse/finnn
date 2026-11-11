@@ -2,6 +2,14 @@
 
 Versions are git tags (`git tag`); each line links to the commits that made it.
 
+## Unreleased: security layer
+- `integrity.py`: numeric text layer vs. rendered page with OCR, hidden-text detection and removal.
+- `gate.py`: binds every number to a box; Verified / Conflict / Abstain from rules, no model.
+- `secure.py`: document access control and a hash-chained audit log around `solve.answer`.
+- `scripts/tamper_eval.py` on dev (CPU, no model): results in `docs/FINAL_PIPELINE.md` section 3.6.
+- Notebook 05 runs end to end with one Run All: Part E on by default (setting still frozen on dev first),
+  2 candidate models, results zipped before the demo starts, setup reports missing TAT-LLM files.
+
 ## v0.5 (2026-10-25): final pipeline
 - Example RAG over the training split (question template + same-unit bonus, tuned on dev with
   `scripts/retrieval_check.py`): retrieved examples match the question's calculation 53.0% vs 46.2% before.

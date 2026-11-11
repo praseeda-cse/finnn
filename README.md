@@ -33,10 +33,15 @@ The earlier pipeline (TAT-LLM-7B + executor + voting, notebook 02) gives 69.0 EM
 | `finsight/retrieve.py` | **RAG**: example retrieval from the training split (question template + unit) and BM25 row retrieval |
 | `finsight/llm.py` | client for any OpenAI-compatible server (Ollama, vLLM, llama.cpp); parallel, resumable |
 | `finsight/risk.py` | **automatic risk report**: verified line items → ratios → Low/Medium/High; large-change scan |
+| `finsight/integrity.py` | **security**: numeric text layer vs. rendered page (OCR), hidden-text detection and removal |
+| `finsight/gate.py` | **security**: binds every number to a box; Verified / Conflict / Abstain from rules, no model |
+| `finsight/secure.py` | **security**: document access control, scan + answer + gate, hash-chained audit log |
 | `finsight/prompt.py`, `infer.py` | answer format and parser; general-LLM baseline (notebook 01) |
 | `finsight/vlm.py` | Qwen2-VL-2B on page images (paper 1 re-run, notebook 04) |
 | `scripts/build_compact.py` | pack the TAT-DQA download → `data/*.json.gz` (19 MB) |
 | `scripts/sanity_check.py` | gold answers through our format + executor + scorer = 99.7% EM on test |
+| `scripts/tamper_eval.py` | security evaluation on dev (CPU): gate cost on gold answers, scan false alarms, detection per tamper type |
+| `tests/test_security.py` | security layer end to end with a scripted model (CPU) |
 | `scripts/make_notebooks.py` | generates the notebooks |
 | `scripts/retrieval_check.py` | how often retrieved examples match the dev question's type, unit and calculation (CPU) |
 | `scripts/analyse_user_study.py` | survey analysis: trust tests, groups, feature requests and charts from the form export |
@@ -77,7 +82,8 @@ Google Drive; results go to **My Drive/finsight/runs/** and every step resumes a
 1. kaggle.com → Create → New notebook → File → Import notebook → GitHub `praseeda-cse/finnn`, `notebooks/05_final_pipeline.ipynb`.
 2. Right panel: Accelerator **GPU T4 x2**, Internet **on**, Persistence **Files only**.
 3. Add data → Upload the TAT-LLM outputs from notebook 02 (`tat-llm-7b-fft_dev200.jsonl`, `tat-llm-7b-fft_test.jsonl`).
-4. Run Parts A–D on dev, then set `RUN_TEST = True` for Part E once. Download `runs.zip` at the end.
+4. Run All once (about 8–10 h). Parts A–C choose everything on dev, then Part E runs the test set once with that
+   frozen choice. If the session stops, Run All again: finished work is loaded from `runs/`. Download `runs.zip` at the end.
 
 ## Reporting rules
 - Tune on **dev**; run **test** once at the end (notebook 05, Part E).
