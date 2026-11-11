@@ -104,6 +104,24 @@ The thresholds are general rules of thumb, and the report says so.
 - **(b)** Share of extracted values that pass the row check.
 - **(c)** A small hand-checked set of report pages, e.g. Indian annual reports, which ties to the survey's lakh/crore request.
 
+### 3.6 Security layer (integrity.py, gate.py, secure.py)
+The grounding check asks whether a number occurs anywhere in the document. The gate also ties it to a box, and
+the integrity scan checks that the box shows the same digits as the text layer. Only a Verified answer is released.
+Measured on dev with `scripts/tamper_eval.py` (CPU, no model; one gold operand altered per page, our own copies):
+
+| Tamper type | Pages | Altered number found |
+|---|---|---|
+| Text layer changed, page looks the same (random or look-alike digit) | 60 each | 100% (95% CI lower bound 94.0%) |
+| Page changed, text layer the same (random or look-alike digit) | 60 each | 100% (94.0%) |
+| Invisible extra text | 60 | 100% (94.0%) |
+| White extra text on white | 60 | 98.3% (91.1%) |
+| **Both layers changed consistently** | 60 each | **0%: the known limit, needs an outside source such as XBRL** |
+
+Cost on the 307 clean dev pages: 22 of 19,183 numbers misread (0.115%), and 28 pages (9.1%) have at least one flag, mostly
+words the scan finds invisible. Gold answers through the gate: 97.0% Verified on the real scans against 97.2% with no scan,
+so the scan itself blocks about 4 of 1,638 correct answers. Not yet measured: the gate on real model output, and
+attackers who adapt to the scan beyond look-alike digits.
+
 ## 4. Evaluation protocol (what makes the claim valid)
 1. Everything is chosen on the **200-question dev sample** (seed 0, same as notebooks 01–02): the model, k,
    direct vs. reason, and the ensemble weights.
@@ -124,6 +142,6 @@ The thresholds are general rules of thumb, and the report says so.
 
 ## 6. Run order
 1. Notebook 02 (already done) → upload `tat-llm-7b-fft_dev200.jsonl` and `tat-llm-7b-fft_test.jsonl` to Kaggle.
-2. Notebook 05 Part A (pick the model, 2–3 candidates first) → Part B (ablation) → Part C (ensemble) → Part D (risk).
-3. Freeze the setting → Part E (test, once) → send `runs.zip`.
-4. Rewrite Paper 2 around the final pipeline; Paper 1 stays as the diagnostic study that motivated it.
+2. Notebook 05, one Run All: Part A (pick the model from 2 candidates) → Part B (ablation) → Part C (ensemble) →
+   Part D (risk) → Part E (test, once, with the setting frozen on dev) → send `runs.zip`.
+3. Rewrite Paper 2 around the final pipeline; Paper 1 stays as the diagnostic study that motivated it.

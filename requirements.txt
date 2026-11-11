@@ -7,6 +7,11 @@ pillow
 scikit-learn     # example retrieval (TF-IDF)
 requests         # talks to the model server (Ollama / vLLM / llama.cpp)
 
+# Security layer (integrity scan OCR, CPU)
+rapidocr
+onnxruntime
+pytest
+
 # Models (GPU; the notebooks install these on Colab)
 torch
 transformers>=4.45
