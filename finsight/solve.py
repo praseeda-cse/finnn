@@ -40,6 +40,8 @@ MODES = {
 SMALL_CONSTANTS = {"1", "2", "3", "4", "5", "10", "12", "100", "1000"}
 NUM = re.compile(r"\d[\d,]*(?:\.\d+)?")
 LAST_BLOCK = re.compile(r"^\s*\**evidence\**\s*:", re.I | re.M)
+UNIT_IN_TEXT = re.compile(r"\b(?:thousand|million|billion)s?\b|%", re.I)
+NUMBER_ONLY = re.compile(r"[\$\(\)\-\d,\. ]+")
 
 
 def messages(doc, question, retriever=None, k=4, mode="direct"):
@@ -78,12 +80,23 @@ def key(answer, scale):
     return tuple(sorted(normalize_answer(str(a)) for a in answer)), scale
 
 
+def span_scale(kind, answer, scale):
+    """A copied span that already carries its unit ("$2.7 million", "12%") or is plain text has no
+    separate scale in TAT-DQA (97-100% of such training answers); the model often adds one anyway."""
+    if kind in ("span", "multi-span"):
+        text = " ".join(map(str, answer))
+        if UNIT_IN_TEXT.search(text) or not NUMBER_ONLY.fullmatch(text):
+            return ""
+    return scale
+
+
 def candidate(raw, doc, index=None):
     """One model reply -> executed candidate answer, or None if nothing usable was produced."""
     parsed = parse_output(final_block(raw))
     answer, scale = to_prediction(parsed)
     if not answer:
         return None
+    scale = span_scale(parsed["type"], answer, scale)
     index = index or _doc_index(doc)
     return {"key": key(answer, scale), "answer": answer, "scale": scale, "type": parsed["type"],
             "evidence": [i for i in parsed["evidence"] if i in index[2]],

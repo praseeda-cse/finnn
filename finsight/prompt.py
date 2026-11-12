@@ -115,11 +115,13 @@ def to_prediction(parsed):
     """Return (answer_list, scale) in the format the official TAT-QA scorer expects."""
     if parsed["program"] is not None:
         value = execute(parsed["program"])
-        answer = [] if value is None else [str(round(value, 4))]
+        answer = [] if value is None else [str(round(value, 4) or 0)]   # "-0.0" fails the scorer; "0" passes
     elif parsed["items"] is not None:
         answer = [str(len(parsed["items"]))]
     elif parsed["answer"] is not None:
         answer = parsed["answer"]
+        if parsed["type"] == "span" and len(set(answer)) == 1:      # the same span copied twice
+            answer = answer[:1]
     else:
         answer = []
     scale = parsed["scale"] if parsed["scale"] in SCALES else ""
